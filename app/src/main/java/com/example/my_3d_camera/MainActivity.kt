@@ -7,12 +7,14 @@ import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import android.util.Range
 import android.view.Surface
 import android.view.TextureView
 import android.widget.Toast
@@ -36,11 +38,11 @@ class MainActivity : AppCompatActivity() {
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
     private val executor = Executors.newSingleThreadExecutor()
-    private var wideCameraId: String? = null
-    private var teleCameraId: String? = null
+    private var logicalCameraId: String? = null
+    private var widePhysicalId: String? = null
+    private var telePhysicalId: String? = null
     private var availableCameras: List<CameraInfo> = emptyList()
-    private var selectedWidePhysicalId: String? = null
-    private var selectedTelePhysicalId: String? = null
+    private var dualCameraInfo: DualCamera? = null
 
     data class CameraInfo(
         val id: String,
@@ -50,6 +52,12 @@ class MainActivity : AppCompatActivity() {
         val isLogical: Boolean = false,
         val physicalIds: Set<String> = emptySet(),
         val zoomRatios: List<Float> = emptyList()
+    )
+
+    data class DualCamera(
+        val logicalId: String,
+        val widePhysicalId: String,
+        val telePhysicalId: String
     )
 
     private val stateCallback = object : CameraDevice.StateCallback() {
@@ -102,24 +110,6 @@ class MainActivity : AppCompatActivity() {
         override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {}
     }
 
-    private fun setupCameraSelection() {
-        val logicalCameras = availableCameras.filter { it.isLogical }
-        if (logicalCameras.isNotEmpty()) {
-            showCameraSelectionDialog("Выберите камеру для левого глаза", logicalCameras) { selectedCamera ->
-                wideCameraId = selectedCamera.id
-                showCameraSelectionDialog("Выберите камеру для правого глаза", logicalCameras) { selectedCamera ->
-                    teleCameraId = selectedCamera.id
-                    if (binding.viewFinderWide.isAvailable) {
-                        startWideCamera()
-                    }
-                    if (binding.viewFinder.isAvailable) {
-                        startTeleCamera()
-                    }
-                }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -158,6 +148,7 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "=== Информация о камерах устройства ===")
             
+            // Собираем информацию о камерах
             availableCameras = cameraIdList.map { id ->
                 val characteristics = cameraManager?.getCameraCharacteristics(id)
                 val facing = characteristics?.get(CameraCharacteristics.LENS_FACING)
@@ -165,120 +156,159 @@ class MainActivity : AppCompatActivity() {
                 val focalLength = focalLengths?.get(0) ?: 0f
                 val physicalCameras = characteristics?.physicalCameraIds ?: emptySet()
                 
-                // Получаем доступные значения зума
                 val zoomRatios = if (facing == CameraCharacteristics.LENS_FACING_BACK) {
                     characteristics?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.let { range ->
-                        listOf(range.lower, 1.0f, range.upper)
+                        listOf(range.lower, range.upper)
                     } ?: emptyList()
                 } else {
                     emptyList()
                 }
-                
+
                 val facingStr = when (facing) {
                     CameraCharacteristics.LENS_FACING_BACK -> "Задняя"
                     CameraCharacteristics.LENS_FACING_FRONT -> "Передняя"
                     else -> "Неизвестная"
                 }
 
-                CameraInfo(
+                val isLogical = physicalCameras.isNotEmpty()
+                val cameraInfo = CameraInfo(
                     id = id,
                     facing = facing ?: -1,
                     focalLength = focalLength,
                     description = "Камера $id ($facingStr, ${String.format("%.1f", focalLength)}мм)",
-                    isLogical = physicalCameras.isNotEmpty(),
+                    isLogical = isLogical,
                     physicalIds = physicalCameras,
                     zoomRatios = zoomRatios
                 )
+                
+                Log.d(TAG, "Камера: ${cameraInfo.description}, Логическая: $isLogical, " +
+                           "Физические ID: ${physicalCameras.joinToString(", ")}, " +
+                           "Фокусное расстояние: $focalLength")
+                cameraInfo
             }
-
-            Log.d(TAG, "Найдены камеры: ${availableCameras.map { it.description }}")
+            
+            // Найдем пару камер с наибольшей разницей фокусных расстояний
+            dualCameraInfo = findDualCamera()
+            
+            if (dualCameraInfo != null) {
+                Log.d(TAG, "Найдена пара камер: Логическая=${dualCameraInfo!!.logicalId}, " +
+                           "Широкоугольная=${dualCameraInfo!!.widePhysicalId}, " +
+                           "Телефото=${dualCameraInfo!!.telePhysicalId}")
+            } else {
+                Log.d(TAG, "Не найдена подходящая пара камер")
+            }
+            
+            Log.d(TAG, "Найдены камеры: ${availableCameras.map { "${it.description} (${it.zoomRatios})" }}")
         } catch (e: Exception) {
             Log.e(TAG, "Error setting up available cameras", e)
             e.printStackTrace()
         }
     }
-
-    private fun showCameraSelectionDialog(title: String, cameras: List<CameraInfo>, onCameraSelected: (CameraInfo) -> Unit) {
-        // Этот метод больше не используется, но пока оставим его на случай,
-        // если понадобится добавить ручной выбор камер в будущем
-        val cameraNames = cameras.map { it.description }.toTypedArray()
+    
+    private fun findDualCamera(): DualCamera? {
+        // Находим логические камеры с двумя и более физическими камерами
+        val logicalCameras = availableCameras.filter { 
+            it.isLogical && 
+            it.facing == CameraCharacteristics.LENS_FACING_BACK && 
+            it.physicalIds.size >= 2 
+        }
         
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setItems(cameraNames) { _, which ->
-                onCameraSelected(cameras[which])
+        if (logicalCameras.isEmpty()) {
+            Log.d(TAG, "Нет логических камер с двумя физическими камерами")
+            return null
+        }
+        
+        for (logicalCamera in logicalCameras) {
+            // Получаем фокусные расстояния всех физических камер
+            val physicalCamerasWithFocalLengths = logicalCamera.physicalIds.map { physicalId ->
+                val characteristics = cameraManager?.getCameraCharacteristics(physicalId)
+                val focalLengths = characteristics?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                val focalLength = focalLengths?.get(0) ?: 0f
+                Pair(physicalId, focalLength)
             }
-            .setCancelable(false)
-            .show()
+            
+            // Сортируем по фокусному расстоянию
+            val sortedCameras = physicalCamerasWithFocalLengths.sortedBy { it.second }
+            
+            if (sortedCameras.size >= 2) {
+                // Берем камеру с минимальным и максимальным фокусным расстоянием
+                val wideCamera = sortedCameras.first()
+                val teleCamera = sortedCameras.last()
+                
+                Log.d(TAG, "Для логической камеры ${logicalCamera.id} выбраны: " +
+                           "Широкоугольная=${wideCamera.first} (${wideCamera.second}мм), " +
+                           "Телефото=${teleCamera.first} (${teleCamera.second}мм)")
+                
+                return DualCamera(
+                    logicalId = logicalCamera.id,
+                    widePhysicalId = wideCamera.first,
+                    telePhysicalId = teleCamera.first
+                )
+            }
+        }
+        
+        return null
     }
 
     private fun openCamera() {
+        if (!isWideTextureAvailable || !isTeleTextureAvailable) {
+            Log.d(TAG, "TextureView не готов")
+            return
+        }
+        
         try {
-            // Находим заднюю камеру
-            val backCamera = availableCameras.find { 
-                it.facing == CameraCharacteristics.LENS_FACING_BACK && it.isLogical 
-            }
-
-            if (backCamera != null) {
+            if (dualCameraInfo != null) {
+                // Используем логическую камеру с двумя физическими
+                logicalCameraId = dualCameraInfo!!.logicalId
+                widePhysicalId = dualCameraInfo!!.widePhysicalId
+                telePhysicalId = dualCameraInfo!!.telePhysicalId
+                
+                Log.d(TAG, "Открываем логическую камеру: $logicalCameraId")
+                
                 if (ActivityCompat.checkSelfPermission(
                         this,
                         Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    cameraManager?.openCamera(backCamera.id, stateCallback, cameraHandler)
+                    cameraManager?.openCamera(logicalCameraId!!, stateCallback, cameraHandler)
                 }
             } else {
-                Toast.makeText(this, "Не найдена подходящая камера", Toast.LENGTH_LONG).show()
+                // Запасной вариант: ищем обычную заднюю камеру
+                val backCamera = availableCameras.find { 
+                    it.facing == CameraCharacteristics.LENS_FACING_BACK 
+                }
+                
+                if (backCamera != null) {
+                    Log.d(TAG, "Запасной вариант: открываем обычную камеру: ${backCamera.id}")
+                    
+                    if (ActivityCompat.checkSelfPermission(
+                            this,
+                            Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        cameraManager?.openCamera(backCamera.id, stateCallback, cameraHandler)
+                    }
+                } else {
+                    Toast.makeText(this, "Не найдена подходящая камера", Toast.LENGTH_LONG).show()
+                }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error opening camera", e)
+            Log.e(TAG, "Ошибка при открытии камеры", e)
             e.printStackTrace()
-        }
-    }
-
-    private fun startWideCamera() {
-        try {
-            wideCameraId?.let { id ->
-                if (ActivityCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    cameraManager?.openCamera(id, stateCallback, cameraHandler)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting wide camera", e)
-        }
-    }
-
-    private fun startTeleCamera() {
-        try {
-            teleCameraId?.let { id ->
-                if (ActivityCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    cameraManager?.openCamera(id, stateCallback, cameraHandler)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting tele camera", e)
         }
     }
 
     private fun createCameraPreviewSession() {
         if (!isWideTextureAvailable || !isTeleTextureAvailable) {
-            Log.e(TAG, "Attempt to create session when TextureViews are not ready")
+            Log.e(TAG, "TextureViews не готовы")
             return
         }
 
         try {
             val wideTexture = binding.viewFinderWide.surfaceTexture
-                ?: throw IllegalStateException("Wide texture is null")
+                ?: throw IllegalStateException("Широкоугольная текстура отсутствует")
             val teleTexture = binding.viewFinder.surfaceTexture
-                ?: throw IllegalStateException("Tele texture is null")
+                ?: throw IllegalStateException("Теле текстура отсутствует")
 
             wideTexture.setDefaultBufferSize(1920, 1080)
             teleTexture.setDefaultBufferSize(1920, 1080)
@@ -286,192 +316,305 @@ class MainActivity : AppCompatActivity() {
             val wideSurface = Surface(wideTexture)
             val teleSurface = Surface(teleTexture)
 
-            // Создаем запросы для обоих preview с разными зумами
-            wideRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-            teleRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-
-            wideRequestBuilder?.addTarget(wideSurface)
-            teleRequestBuilder?.addTarget(teleSurface)
-
-            // Устанавливаем разные зумы
-            val backCamera = availableCameras.find { 
-                it.facing == CameraCharacteristics.LENS_FACING_BACK && it.isLogical 
-            }
-            backCamera?.zoomRatios?.let { ratios ->
-                if (ratios.isNotEmpty()) {
-                    wideRequestBuilder?.set(CaptureRequest.CONTROL_ZOOM_RATIO, ratios.first())
-                    teleRequestBuilder?.set(CaptureRequest.CONTROL_ZOOM_RATIO, ratios.last())
-                }
-            }
-
-            wideRequestBuilder?.set(
+            // Создаем запрос для предпросмотра
+            val previewRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                ?: throw IllegalStateException("Не удалось создать запрос камеры")
+            
+            // Добавляем обе поверхности в запрос
+            previewRequestBuilder.addTarget(wideSurface)
+            previewRequestBuilder.addTarget(teleSurface)
+            
+            // Устанавливаем автофокус на бесконечность
+            previewRequestBuilder.set(
                 CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                CaptureRequest.CONTROL_AF_MODE_OFF
             )
-            teleRequestBuilder?.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            previewRequestBuilder.set(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                0.0f  // 0.0 для фокуса на бесконечность
             )
-
-            // Создаем одну сессию с двумя поверхностями
-            cameraDevice?.createCaptureSession(
-                listOf(wideSurface, teleSurface),
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        captureSession = session
-                        try {
-                            // Запускаем оба preview
-                            val wideRequest = wideRequestBuilder?.build()
-                            val teleRequest = teleRequestBuilder?.build()
-                            if (wideRequest != null && teleRequest != null) {
-                                captureSession?.setRepeatingBurst(
-                                    listOf(wideRequest, teleRequest),
-                                    null,
-                                    cameraHandler
-                                )
+            previewRequestBuilder.set(
+                CaptureRequest.CONTROL_SCENE_MODE,
+                CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+            )
+            
+            // Если мы используем логическую камеру, настраиваем физические ID
+            if (widePhysicalId != null && telePhysicalId != null) {
+                Log.d(TAG, "Настраиваем физические камеры: Wide=$widePhysicalId, Tele=$telePhysicalId")
+                
+                // Ассоциируем физические ID с поверхностями
+                val physicalCameraSettings = mutableMapOf<String, CaptureRequest.Builder>()
+                
+                // Создаем настройки для широкоугольной камеры
+                val wideBuilder = CameraDevice.TEMPLATE_PREVIEW
+                    .let { template -> cameraDevice?.createCaptureRequest(template) }
+                    ?: throw IllegalStateException("Не удалось создать запрос для широкоугольной камеры")
+                
+                // Создаем настройки для телефото камеры
+                val teleBuilder = CameraDevice.TEMPLATE_PREVIEW
+                    .let { template -> cameraDevice?.createCaptureRequest(template) }
+                    ?: throw IllegalStateException("Не удалось создать запрос для телефото камеры")
+                
+                // Настраиваем каждую физическую камеру
+                physicalCameraSettings[widePhysicalId!!] = wideBuilder
+                physicalCameraSettings[telePhysicalId!!] = teleBuilder
+                
+                // Создаем запрос для каждой физической камеры
+                val outputConfigurationList = mutableListOf<OutputConfiguration>()
+                
+                // Конфигурация для широкоугольной камеры
+                val wideOutputConfig = OutputConfiguration(wideSurface)
+                wideOutputConfig.setPhysicalCameraId(widePhysicalId!!)
+                outputConfigurationList.add(wideOutputConfig)
+                
+                // Конфигурация для телефото камеры
+                val teleOutputConfig = OutputConfiguration(teleSurface)
+                teleOutputConfig.setPhysicalCameraId(telePhysicalId!!)
+                outputConfigurationList.add(teleOutputConfig)
+                
+                // Создаем сессию с указанием физических камер для каждой поверхности
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputConfigurationList,
+                    executor,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(session: CameraCaptureSession) {
+                            captureSession = session
+                            try {
+                                // Запускаем предпросмотр
+                                val previewRequest = previewRequestBuilder.build()
+                                captureSession?.setRepeatingRequest(previewRequest, null, cameraHandler)
+                                
+                                Log.d(TAG, "Сессия с физическими камерами успешно настроена")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Ошибка запуска предпросмотра", e)
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error starting camera preview", e)
+                        }
+
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            Log.e(TAG, "Ошибка настройки сессии мультикамеры")
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Ошибка настройки мультикамеры",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            
+                            // Пробуем запасной вариант с обычной сессией
+                            tryFallbackSession(wideSurface, teleSurface, previewRequestBuilder)
                         }
                     }
-
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Ошибка настройки камеры",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
-                null
-            )
+                )
+                
+                cameraDevice?.createCaptureSession(sessionConfig)
+            } else {
+                // Запасной вариант без физических ID
+                tryFallbackSession(wideSurface, teleSurface, previewRequestBuilder)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating camera preview session", e)
+            Log.e(TAG, "Ошибка создания сессии предпросмотра камеры", e)
             e.printStackTrace()
         }
     }
-
-    private fun showPhysicalCameraSelectionDialog(
-        cameraInfo: CameraInfo,
-        isWideCamera: Boolean,
-        onPhysicalCameraSelected: (String?) -> Unit
+    
+    private fun tryFallbackSession(
+        wideSurface: Surface, 
+        teleSurface: Surface,
+        previewRequestBuilder: CaptureRequest.Builder
     ) {
-        if (cameraInfo.physicalIds.isEmpty()) {
-            Toast.makeText(this, "У этой камеры нет дополнительных объективов", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val options = mutableListOf<Pair<String?, String>>()
-        options.add(Pair(null, "Автоматический выбор"))
+        Log.d(TAG, "Используем запасной вариант сессии без физических ID")
         
-        cameraInfo.physicalIds.forEach { physicalId ->
-            val characteristics = cameraManager?.getCameraCharacteristics(physicalId)
-            val focalLength = characteristics?.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.get(0) ?: 0f
-            val description = when {
-                focalLength < 4.0f -> "Широкоугольный"
-                focalLength > 8.0f -> "Телефото"
-                else -> "Стандартный"
-            }
-            options.add(Pair(physicalId, "$description объектив (${String.format("%.1f", focalLength)}мм)"))
-        }
-
-        val items = options.map { it.second }.toTypedArray()
-
-        AlertDialog.Builder(this)
-            .setTitle(if (isWideCamera) "Выберите объектив для левого кадра" else "Выберите объектив для правого кадра")
-            .setItems(items) { _, which ->
-                onPhysicalCameraSelected(options[which].first)
-                if (isWideCamera) {
-                    selectedWidePhysicalId = options[which].first
-                    wideRequestBuilder?.let { builder ->
-                        builder.get(CaptureRequest.CONTROL_ZOOM_RATIO)?.let { zoom ->
-                            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
-                        }
-                    }
-                } else {
-                    selectedTelePhysicalId = options[which].first
-                    teleRequestBuilder?.let { builder ->
-                        builder.get(CaptureRequest.CONTROL_ZOOM_RATIO)?.let { zoom ->
-                            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom)
-                        }
+        // Создаем обычную сессию без привязки к физическим камерам
+        cameraDevice?.createCaptureSession(
+            listOf(wideSurface, teleSurface),
+            object : CameraCaptureSession.StateCallback() {
+                override fun onConfigured(session: CameraCaptureSession) {
+                    captureSession = session
+                    try {
+                        // Запускаем предпросмотр
+                        val previewRequest = previewRequestBuilder.build()
+                        captureSession?.setRepeatingRequest(previewRequest, null, cameraHandler)
+                        
+                        Log.d(TAG, "Запасной вариант сессии успешно настроен")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка запуска предпросмотра в запасном варианте", e)
                     }
                 }
-            }
-            .show()
+
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Ошибка настройки камеры",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            null
+        )
     }
 
     private fun take3DPhoto() {
         try {
-            val wideCaptureBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-            val teleCaptureBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-
             val wideImageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 2)
             val teleImageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 2)
 
-            wideCaptureBuilder?.addTarget(wideImageReader.surface)
-            teleCaptureBuilder?.addTarget(teleImageReader.surface)
-
-            // Копируем настройки зума из preview builders
-            wideRequestBuilder?.let { builder ->
-                wideCaptureBuilder?.set(
-                    CaptureRequest.CONTROL_ZOOM_RATIO,
-                    builder.get(CaptureRequest.CONTROL_ZOOM_RATIO)
+            if (widePhysicalId != null && telePhysicalId != null) {
+                // Используем логическую мультикамеру
+                Log.d(TAG, "Создание 3D фото с мультикамерой")
+                
+                // Создаем запрос для фото
+                val captureBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                    ?: throw IllegalStateException("Не удалось создать запрос для фото")
+                
+                // Создаем конфигурации для выходных данных
+                val outputConfigurationList = mutableListOf<OutputConfiguration>()
+                
+                // Конфигурация для широкоугольной камеры
+                val wideOutputConfig = OutputConfiguration(wideImageReader.surface)
+                wideOutputConfig.setPhysicalCameraId(widePhysicalId!!)
+                outputConfigurationList.add(wideOutputConfig)
+                
+                // Конфигурация для телефото камеры
+                val teleOutputConfig = OutputConfiguration(teleImageReader.surface)
+                teleOutputConfig.setPhysicalCameraId(telePhysicalId!!)
+                outputConfigurationList.add(teleOutputConfig)
+                
+                // Настраиваем запрос
+                captureBuilder.addTarget(wideImageReader.surface)
+                captureBuilder.addTarget(teleImageReader.surface)
+                
+                captureBuilder.set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                captureBuilder.set(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    0.0f  // 0.0 для фокуса на бесконечность
+                )
+                captureBuilder.set(
+                    CaptureRequest.CONTROL_SCENE_MODE,
+                    CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+                )
+                
+                // Останавливаем предпросмотр
+                captureSession?.stopRepeating()
+                
+                // Делаем фото
+                captureSession?.captureBurst(
+                    listOf(captureBuilder.build()),
+                    object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult
+                        ) {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "3D фото сохранено",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            
+                            // Восстанавливаем предпросмотр
+                            try {
+                                // Создаем запрос для предпросмотра
+                                val previewRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                    ?: throw IllegalStateException("Не удалось создать запрос для предпросмотра")
+                                
+                                // Получаем поверхности из TextureView
+                                val wideTexture = binding.viewFinderWide.surfaceTexture
+                                    ?: throw IllegalStateException("Широкоугольная текстура отсутствует")
+                                val teleTexture = binding.viewFinder.surfaceTexture
+                                    ?: throw IllegalStateException("Теле текстура отсутствует")
+                                
+                                val wideSurface = Surface(wideTexture)
+                                val teleSurface = Surface(teleTexture)
+                                
+                                // Добавляем поверхности в запрос
+                                previewRequestBuilder.addTarget(wideSurface)
+                                previewRequestBuilder.addTarget(teleSurface)
+                                
+                                // Настраиваем запрос
+                                previewRequestBuilder.set(
+                                    CaptureRequest.CONTROL_AF_MODE,
+                                    CaptureRequest.CONTROL_AF_MODE_OFF
+                                )
+                                previewRequestBuilder.set(
+                                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                                    0.0f
+                                )
+                                previewRequestBuilder.set(
+                                    CaptureRequest.CONTROL_SCENE_MODE,
+                                    CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+                                )
+                                
+                                // Восстанавливаем предпросмотр
+                                captureSession?.setRepeatingRequest(
+                                    previewRequestBuilder.build(),
+                                    null,
+                                    cameraHandler
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Ошибка восстановления предпросмотра", e)
+                            }
+                        }
+                    },
+                    cameraHandler
+                )
+            } else {
+                // Запасной вариант для обычной камеры
+                Log.d(TAG, "Создание 3D фото с обычной камерой")
+                
+                val captureBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                
+                captureBuilder?.addTarget(wideImageReader.surface)
+                captureBuilder?.set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                captureBuilder?.set(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    0.0f
+                )
+                
+                captureSession?.stopRepeating()
+                
+                captureSession?.capture(
+                    captureBuilder?.build()!!,
+                    object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult
+                        ) {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Фото сохранено (режим одиночной камеры)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            
+                            // Восстанавливаем предпросмотр
+                            try {
+                                val previewRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                val wideSurface = Surface(binding.viewFinderWide.surfaceTexture)
+                                val teleSurface = Surface(binding.viewFinder.surfaceTexture)
+                                
+                                previewRequestBuilder?.addTarget(wideSurface)
+                                previewRequestBuilder?.addTarget(teleSurface)
+                                
+                                captureSession?.setRepeatingRequest(
+                                    previewRequestBuilder?.build()!!,
+                                    null,
+                                    cameraHandler
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Ошибка восстановления предпросмотра", e)
+                            }
+                        }
+                    },
+                    null
                 )
             }
-
-            teleRequestBuilder?.let { builder ->
-                teleCaptureBuilder?.set(
-                    CaptureRequest.CONTROL_ZOOM_RATIO,
-                    builder.get(CaptureRequest.CONTROL_ZOOM_RATIO)
-                )
-            }
-
-            wideCaptureBuilder?.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-            teleCaptureBuilder?.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-
-            captureSession?.stopRepeating()
-            captureSession?.abortCaptures()
-
-            // Делаем снимки
-            captureSession?.capture(
-                wideCaptureBuilder?.build()!!,
-                object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        result: TotalCaptureResult
-                    ) {
-                        captureSession?.capture(
-                            teleCaptureBuilder?.build()!!,
-                            object : CameraCaptureSession.CaptureCallback() {
-                                override fun onCaptureCompleted(
-                                    session: CameraCaptureSession,
-                                    request: CaptureRequest,
-                                    result: TotalCaptureResult
-                                ) {
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "3D фото сохранено",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    // Восстанавливаем preview
-                                    createCameraPreviewSession()
-                                }
-                            },
-                            null
-                        )
-                    }
-                },
-                null
-            )
         } catch (e: Exception) {
-            Log.e(TAG, "Error taking 3D photo", e)
+            Log.e(TAG, "Ошибка при создании 3D фото", e)
             Toast.makeText(this, "Ошибка при создании 3D фото", Toast.LENGTH_SHORT).show()
         }
     }
