@@ -5,100 +5,86 @@
     android:layout_height="match_parent">
 
     <LinearLayout
-        android:id="@+id/previewsContainer"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        app:layout_constraintDimensionRatio="2:1"
-        android:orientation="horizontal"
-        android:gravity="center"
-        app:layout_constraintBottom_toTopOf="@+id/zoomControlsContainer"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <TextureView
-            android:id="@+id/viewFinderWide"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginEnd="4dp"
-            android:layout_weight="1" />
-
-        <TextureView
-            android:id="@+id/viewFinder"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_marginStart="4dp" />
-
-    </LinearLayout>
-    
-    <LinearLayout
-        android:id="@+id/zoomControlsContainer"
+        android:id="@+id/contentContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintLeft_toLeftOf="parent"
-        app:layout_constraintRight_toRightOf="parent">
-        
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
         <LinearLayout
+            android:id="@+id/previewsContainer"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="0dp"
             android:orientation="horizontal"
-            android:gravity="center_vertical">
-            
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Левый зум:"
-                android:layout_marginEnd="8dp" />
-            
-            <SeekBar
-                android:id="@+id/wideZoomSeekBar"
+            android:gravity="center">
+
+            <TextureView
+                android:id="@+id/viewFinderWide"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1" />
+
+            <TextureView
+                android:id="@+id/viewFinder"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:max="100"
-                android:progress="10" />
-            
-            <TextView
-                android:id="@+id/wideZoomValue"
-                android:layout_width="48dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:gravity="end"
-                android:layout_marginStart="8dp" />
+                android:layout_marginStart="4dp" />
+
         </LinearLayout>
         
         <LinearLayout
+            android:id="@+id/cropControlsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
-            
-            <TextView
-                android:layout_width="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginTop="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Правый зум:"
-                android:layout_marginEnd="8dp" />
-            
-            <SeekBar
-                android:id="@+id/mainZoomSeekBar"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:max="100"
-                android:progress="10" />
-            
-            <TextView
-                android:id="@+id/mainZoomValue"
-                android:layout_width="48dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:gravity="end"
-                android:layout_marginStart="8dp" />
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:text="Кроп широкоугольной:" />
+
+                <SeekBar
+                    android:id="@+id/wideCropSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+
+                <TextView
+                    android:id="@+id/wideCropValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:gravity="end"
+                    android:text="1.0x" />
+            </LinearLayout>
+
         </LinearLayout>
 
     </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/captureButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="24dp"
+        android:contentDescription="Сделать фото"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent"
+        app:srcCompat="@android:drawable/ic_menu_camera" />
 
 </androidx.constraintlayout.widget.ConstraintLayout> 

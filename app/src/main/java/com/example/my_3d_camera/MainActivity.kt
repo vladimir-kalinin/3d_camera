@@ -4,8 +4,14 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
-import android.hardware.camera2.*
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.os.Bundle
@@ -24,6 +30,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.my_3d_camera.databinding.ActivityMainBinding
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -37,11 +46,13 @@ class MainActivity : AppCompatActivity() {
     private var availableCameras: List<CameraInfo> = emptyList()
     private var dualCameraInfo: DualCamera? = null
     private var cameraDevice: CameraDevice? = null
+    private var previewRequestBuilder: CaptureRequest.Builder? = null
+    private var captureSession: CameraCaptureSession? = null
 
-    // Добавляем переменные для управления зумом
-    private var minZoom: Float = 1.0f
-    private var maxZoom: Float = 5.0f
-    private var zoomSupported: Boolean = false
+    // Добавляем переменные для управления кропом
+    private var minCrop: Float = 1.0f
+    private var maxCrop: Float = 3.0f
+    private var cropSupported: Boolean = true
 
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
@@ -49,8 +60,12 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
-        private const val PREFS_NAME = "CameraZoomPrefs"
+        private val REQUIRED_PERMISSIONS = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_MEDIA_LOCATION
+        )
+        private const val PREFS_NAME = "CameraCropPrefs"
+        private const val WIDE_CROP_KEY = "wide_crop"
     }
 
     data class CameraInfo(
@@ -59,8 +74,7 @@ class MainActivity : AppCompatActivity() {
         val focalLength: Float,
         val description: String,
         val isLogical: Boolean = false,
-        val physicalIds: Set<String> = emptySet(),
-        val zoomRatios: List<Float> = emptyList()
+        val physicalIds: Set<String> = emptySet()
     )
 
     data class DualCamera(
@@ -75,42 +89,20 @@ class MainActivity : AppCompatActivity() {
         var physicalId: String? = null,
         var textureView: TextureView? = null,
         var surface: Surface? = null,
-        var requestBuilder: CaptureRequest.Builder? = null,
-        var zoomValue: Float = 1.0f,
+        var cropValue: Float = 1.0f,
         var isTextureAvailable: Boolean = false,
         var characteristics: CameraCharacteristics? = null,
         private var cameraDevice: CameraDevice? = null,
-        private var captureSession: CameraCaptureSession? = null,
         private val cameraHandler: Handler,
         private val executor: Executor
     ) {
-        // Вспомогательные методы для работы с камерой
-        fun updateZoom(newZoom: Float): Boolean {
-            if (requestBuilder == null || captureSession == null) return false
-
-            // Проверяем, нужно ли обновлять зум
-            val currentZoomValue = requestBuilder?.build()?.get(CaptureRequest.CONTROL_ZOOM_RATIO)
-            if (currentZoomValue != null && Math.abs(currentZoomValue - newZoom) < 0.01f) {
-                Log.d(TAG, "Пропускаем обновление зума для ${type.name} - значение не изменилось")
-                return false
-            }
-
-            try {
-                // Обновляем значение зума
-                zoomValue = newZoom
-                requestBuilder?.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomValue)
-
-                // Применяем новый запрос
-                captureSession?.setRepeatingRequest(
-                    requestBuilder!!.build(),
-                    null,
-                    cameraHandler
-                )
-
-                return true
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка при обновлении зума для ${type.name}: ${e.message}")
-                return false
+        companion object {
+            // Получение строкового представления типа камеры
+            fun getDescription(type: CameraType): String {
+                return when (type) {
+                    CameraType.WIDE -> "Широкоугольная"
+                    CameraType.MAIN -> "Основная"
+                }
             }
         }
 
@@ -120,44 +112,6 @@ class MainActivity : AppCompatActivity() {
             val outputConfig = OutputConfiguration(surface!!)
             outputConfig.setPhysicalCameraId(physicalId!!)
             return outputConfig
-        }
-
-        fun createAndConfigureRequestBuilder(
-            cameraDevice: CameraDevice?,
-            zoomSupported: Boolean
-        ): Boolean {
-            try {
-                Log.d(TAG, "Создаем builder для ${getDescription(type)}")
-                val builder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                    ?: return false
-
-                requestBuilder = builder
-
-                // Добавляем поверхность
-                if (surface == null) {
-                    Log.e(TAG, "Surface is null для ${getDescription(type)}")
-                    return false
-                }
-                surface?.let {
-                    builder.addTarget(it)
-                    Log.d(TAG, "Surface добавлен в builder для ${getDescription(type)}")
-                }
-
-                // Устанавливаем значение зума
-                if (zoomSupported) {
-                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomValue)
-                }
-
-                // Настраиваем параметры камеры
-                configureCameraControls()
-                Log.d(TAG, "Builder успешно настроен для ${getDescription(type)}")
-
-                return true
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка при создании builder'а для ${type.name}: ${e.message}")
-                e.printStackTrace()
-                return false
-            }
         }
 
         fun setBufferSize(width: Int, height: Int) {
@@ -209,82 +163,29 @@ class MainActivity : AppCompatActivity() {
                 )
                 matrix.postScale(scale, scale, centerX, centerY)
                 matrix.postRotate((90 * (rotation - 2)).toFloat(), centerX, centerY)
+
+                // Применяем кроп только для широкоугольной камеры
+                if (type == CameraType.WIDE) {
+                    // Применяем дополнительное масштабирование для кропа
+                    matrix.postScale(cropValue, cropValue, centerX, centerY)
+                }
             } else if (Surface.ROTATION_180 == rotation) {
                 matrix.postRotate(180f, centerX, centerY)
+                
+                // Применяем кроп только для широкоугольной камеры
+                if (type == CameraType.WIDE) {
+                    // Применяем дополнительное масштабирование для кропа
+                    matrix.postScale(cropValue, cropValue, centerX, centerY)
+                }
+            } else {
+                // Для случая без поворота
+                if (type == CameraType.WIDE) {
+                    // Применяем дополнительное масштабирование для кропа
+                    matrix.postScale(cropValue, cropValue, centerX, centerY)
+                }
             }
 
             textureView.setTransform(matrix)
-        }
-
-        private fun configureCameraControls() {
-            requestBuilder?.apply {
-                // Автофокус
-                set(
-                    CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-                )
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-
-                // Экспозиция
-                set(
-                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
-                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
-                )
-                set(CaptureRequest.CONTROL_AE_LOCK, false)
-
-                try {
-                    set(
-                        CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                        CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "Ошибка настройки PRECAPTURE_TRIGGER: ${e.message}")
-                }
-
-                // Оптимизация качества
-                set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
-
-                try {
-                    set(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "Видеостабилизация не поддерживается: ${e.message}")
-                }
-
-                try {
-                    set(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "Оптическая стабилизация не поддерживается: ${e.message}")
-                }
-
-                set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
-
-                try {
-                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                } catch (e: Exception) {
-                    Log.d(TAG, "CAPTURE_INTENT не поддерживается: ${e.message}")
-                }
-
-                try {
-                    set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
-                } catch (e: Exception) {
-                    Log.d(TAG, "EDGE_MODE не поддерживается: ${e.message}")
-                }
-
-                try {
-                    set(
-                        CaptureRequest.CONTROL_CAPTURE_INTENT,
-                        CaptureRequest.CONTROL_CAPTURE_INTENT_PREVIEW
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "CAPTURE_INTENT не поддерживается: ${e.message}")
-                }
-            }
         }
 
         private fun chooseOptimalSize(
@@ -305,27 +206,6 @@ class MainActivity : AppCompatActivity() {
             }.filter {
                 it.width <= targetWidth * 1.2 && it.height <= targetHeight * 1.2
             }.maxByOrNull { it.width * it.height } ?: choices.first()
-        }
-
-        companion object {
-            private const val WIDE_ZOOM_KEY = "wide_zoom"
-            private const val MAIN_ZOOM_KEY = "main_zoom"
-
-            // Получение ключа для сохранения настроек
-            fun getZoomPrefsKey(type: CameraType): String {
-                return when (type) {
-                    CameraType.WIDE -> WIDE_ZOOM_KEY
-                    CameraType.MAIN -> MAIN_ZOOM_KEY
-                }
-            }
-
-            // Получение строкового представления типа камеры
-            fun getDescription(type: CameraType): String {
-                return when (type) {
-                    CameraType.WIDE -> "Широкоугольная"
-                    CameraType.MAIN -> "Основная"
-                }
-            }
         }
 
         fun setupTextureListener(onTexturesReady: () -> Unit): TextureView.SurfaceTextureListener {
@@ -376,126 +256,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        fun setupOptimalPreviewSize(windowManager: WindowManager): Pair<Int, Int>? {
-            val textureView = this.textureView ?: return null
-            val characteristics = this.characteristics ?: return null
-
-            val streamConfigurationMap = characteristics.get(
-                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-            ) ?: return null
-
-            val previewSizes = streamConfigurationMap.getOutputSizes(SurfaceTexture::class.java)
-            val optimalSize = chooseOptimalSize(
-                previewSizes,
-                textureView.width,
-                textureView.height
-            )
-
-            // Настраиваем трансформацию и размер буфера
-            configureTransform(windowManager)
-            setBufferSize(optimalSize.width, optimalSize.height)
-
-            return Pair(optimalSize.width, optimalSize.height)
-        }
-
-        fun updateZoomText(textView: android.widget.TextView) {
-            textView.text = String.format("%.1fx", zoomValue)
-        }
-
-        fun updateZoomProgress(seekBar: android.widget.SeekBar, minZoom: Float, maxZoom: Float) {
-            val progress = ((zoomValue - minZoom) / (maxZoom - minZoom) * 100).toInt()
-            seekBar.progress = progress.coerceIn(0, 100)
-        }
-
-        fun prepareTextureWithSize(width: Int = 0, height: Int = 0): Boolean {
-            if (!prepareSurface()) {
-                throw IllegalStateException("${getDescription(type)} текстура отсутствует")
-            }
-
-            if (width > 0 && height > 0) {
-                setBufferSize(width, height)
-            }
-
-            return true
-        }
-
-        fun createCameraSession(
-            onSessionConfigured: ((CameraCaptureSession) -> Unit)? = null
-        ) {
-            if (!isTextureAvailable) {
-                Log.e(TAG, "${getDescription(type)} текстура не готова")
-                return
-            }
-
-            try {
-                val outputConfig = getOutputConfiguration() ?: return
-                Log.d(TAG, "Создаем сессию для ${getDescription(type)}")
-
-                val sessionConfig = SessionConfiguration(
-                    SessionConfiguration.SESSION_REGULAR,
-                    listOf(outputConfig),
-                    executor,
-                    object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(session: CameraCaptureSession) {
-                            Log.d(TAG, "Сессия ${getDescription(type)} настроена")
-                            captureSession = session
-                            try {
-                                requestBuilder?.build()?.let { request ->
-                                    captureSession?.setRepeatingRequest(
-                                        request,
-                                        null,
-                                        cameraHandler
-                                    )
-                                    Log.d(TAG, "Запущен предпросмотр для ${getDescription(type)}")
-                                }
-                                onSessionConfigured?.invoke(session)
-                            } catch (e: Exception) {
-                                Log.e(
-                                    TAG,
-                                    "Ошибка запуска предпросмотра для ${getDescription(type)}: ${e.message}"
-                                )
-                            }
-                        }
-
-                        override fun onConfigureFailed(session: CameraCaptureSession) {
-                            Log.e(TAG, "Ошибка настройки сессии для ${getDescription(type)}")
-                        }
-                    }
-                )
-
-                cameraDevice?.createCaptureSession(sessionConfig)
-            } catch (e: Exception) {
-                Log.e(TAG, "Ошибка создания сессии для ${getDescription(type)}: ${e.message}")
-            }
-        }
-
-        fun getStateCallback(onCameraOpened: () -> Unit): CameraDevice.StateCallback {
-            return object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) {
-                    Log.d(TAG, "Камера ${getDescription(type)} открыта")
-                    cameraDevice = camera
-                    createAndConfigureRequestBuilder(camera, true)
-                    onCameraOpened()
-                }
-
-                override fun onDisconnected(camera: CameraDevice) {
-                    Log.d(TAG, "Камера ${getDescription(type)} отключена")
-                    camera.close()
-                    cameraDevice = null
-                }
-
-                override fun onError(camera: CameraDevice, error: Int) {
-                    Log.e(TAG, "Ошибка устройства камеры ${getDescription(type)}: $error")
-                    camera.close()
-                    cameraDevice = null
-                }
-            }
-        }
-
         fun close() {
             try {
-                captureSession?.close()
-                captureSession = null
                 cameraDevice?.close()
                 cameraDevice = null
             } catch (e: Exception) {
@@ -555,22 +317,108 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Восстанавливаем настройки зума
-        restoreZoomSettings()
+        // Устанавливаем соотношение сторон для превью
+        binding.previewsContainer.post {
+            val width = binding.previewsContainer.width
+            val params = binding.previewsContainer.layoutParams
+            params.height = width / 2 // соотношение 2:1
+            binding.previewsContainer.layoutParams = params
+        }
+
+        // Восстанавливаем настройки кропа
+        restoreCropSettings()
 
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        setupAvailableCameras()
 
-        // Настраиваем TextureView Listeners
-        setupTextureViewListeners()
-
-        // Настраиваем ползунки для зума
-        setupZoomControls()
-
+        // Проверяем разрешения перед инициализацией камеры
         if (!allPermissionsGranted()) {
-            ActivityCompat.requestPermissions(
-                this, REQUIRED_PERMISSIONS, CAMERA_PERMISSION_REQUEST
-            )
+            requestPermissions()
+        } else {
+            initializeCamera()
+        }
+    }
+
+    private fun requestPermissions() {
+        when {
+            shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) ||
+            shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) ||
+            shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE) -> {
+                // Показываем диалог с объяснением, почему нужны разрешения
+                AlertDialog.Builder(this)
+                    .setTitle("Необходимы разрешения")
+                    .setMessage("Для работы приложения требуется доступ к камере и хранилищу. Пожалуйста, предоставьте необходимые разрешения.")
+                    .setPositiveButton("OK") { _, _ ->
+                        ActivityCompat.requestPermissions(
+                            this,
+                            REQUIRED_PERMISSIONS,
+                            CAMERA_PERMISSION_REQUEST
+                        )
+                    }
+                    .setNegativeButton("Отмена") { _, _ ->
+                        Toast.makeText(
+                            this,
+                            "Без разрешений приложение не может работать",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        finish()
+                    }
+                    .create()
+                    .show()
+            }
+            else -> {
+                // Запрашиваем разрешения
+                ActivityCompat.requestPermissions(
+                    this,
+                    REQUIRED_PERMISSIONS,
+                    CAMERA_PERMISSION_REQUEST
+                )
+            }
+        }
+    }
+
+    private fun initializeCamera() {
+        setupAvailableCameras()
+        setupTextureViewListeners()
+        setupCropControls()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            if (allPermissionsGranted()) {
+                // Разрешения получены, инициализируем камеру
+                initializeCamera()
+            } else {
+                // Проверяем, можно ли показать диалог повторно
+                if (shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) ||
+                    shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) ||
+                    shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                    requestPermissions()
+                } else {
+                    // Пользователь отказал в разрешениях и выбрал "Больше не спрашивать"
+                    AlertDialog.Builder(this)
+                        .setTitle("Разрешения не получены")
+                        .setMessage("Для работы приложения необходимы разрешения. Пожалуйста, предоставьте их в настройках приложения.")
+                        .setPositiveButton("Открыть настройки") { _, _ ->
+                            // Открываем настройки приложения
+                            val intent = android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:$packageName")
+                            )
+                            startActivity(intent)
+                            finish()
+                        }
+                        .setNegativeButton("Закрыть") { _, _ ->
+                            finish()
+                        }
+                        .create()
+                        .show()
+                }
+            }
         }
     }
 
@@ -579,104 +427,22 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.action_save_zoom -> {
-                saveZoomSettings()
-                Toast.makeText(this, "Настройки зума сохранены", Toast.LENGTH_SHORT).show()
-                true
-            }
-
-            R.id.action_reset_zoom -> {
-                resetZoomSettings()
-                true
-            }
-
-            R.id.action_about -> {
-                showAboutDialog()
-                true
-            }
-
-            else -> super.onOptionsItemSelected(item)
-        }
-    }
-
-    // Метод для сброса настроек зума к значениям по умолчанию
-    private fun resetZoomSettings() {
-        // Устанавливаем значения по умолчанию
-        wideCameraInstance.zoomValue = minZoom
-        mainCameraInstance.zoomValue = minZoom * 1.5f
-
-        // Ограничиваем значения диапазоном
-        mainCameraInstance.zoomValue = mainCameraInstance.zoomValue.coerceIn(minZoom, maxZoom)
-
-        // Обновляем UI
-        updateZoomUI()
-
-        // Применяем зум к камерам
-        if (zoomSupported) {
-            wideCameraInstance.updateZoom(wideCameraInstance.zoomValue)
-            mainCameraInstance.updateZoom(mainCameraInstance.zoomValue)
-        }
-
-        Toast.makeText(this, "Настройки зума сброшены", Toast.LENGTH_SHORT).show()
-    }
-
-    // Настройка ползунков для зума
-    private fun setupZoomControls() {
-        // Настраиваем ползунок для широкоугольной камеры
-        binding.wideZoomSeekBar.setOnSeekBarChangeListener(
-            createZoomSeekBarListener(CameraType.WIDE)
-        )
-
-        // Настраиваем ползунок для основной камеры
-        binding.mainZoomSeekBar.setOnSeekBarChangeListener(
-            createZoomSeekBarListener(CameraType.MAIN)
-        )
-
-        // Инициализируем текстовые поля со значениями зума
-        updateZoomUI()
-
-        // Устанавливаем начальные значения ползунков на основе сохраненных настроек
-        if (zoomSupported) {
-            updateZoomUI()
-        }
-    }
-
-    // Обновляем позиции ползунков зума и текст
-    private fun updateZoomUI() {
-        wideCameraInstance.apply {
-            updateZoomProgress(binding.wideZoomSeekBar, minZoom, maxZoom)
-            updateZoomText(binding.wideZoomValue)
-        }
-        mainCameraInstance.apply {
-            updateZoomProgress(binding.mainZoomSeekBar, minZoom, maxZoom)
-            updateZoomText(binding.mainZoomValue)
-        }
-    }
-
-    // Создаем универсальный слушатель ползунка зума для обоих типов камер
-    private fun createZoomSeekBarListener(type: CameraType): SeekBar.OnSeekBarChangeListener {
+    // Создаем слушатель ползунка кропа для широкоугольной камеры
+    private fun createCropSeekBarListener(): SeekBar.OnSeekBarChangeListener {
         var isDragging = false
 
         return object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && zoomSupported) {
-                    // Масштабируем прогресс от 0-100 к minZoom-maxZoom
-                    val newZoom = minZoom + (progress / 100f) * (maxZoom - minZoom)
-                    val camera = getCameraInstance(type)
-                    camera.zoomValue = newZoom
-                    camera.updateZoomText(
-                        when (type) {
-                            CameraType.WIDE -> binding.wideZoomValue
-                            CameraType.MAIN -> binding.mainZoomValue
-                        }
-                    )
+                if (fromUser && cropSupported) {
+                    // Масштабируем прогресс от 0-100 к minCrop-maxCrop
+                    val newCrop = minCrop + (progress / 100f) * (maxCrop - minCrop)
+                    wideCameraInstance.cropValue = newCrop
+                    
+                    // Обновляем текст кропа
+                    binding.wideCropValue.text = String.format("%.1fx", newCrop)
 
-                    // Применяем зум только если не в процессе перетаскивания
-                    if (!isDragging) {
-                        camera.updateZoom(newZoom)
-                    }
+                    // Применяем кроп через трансформацию
+                    wideCameraInstance.configureTransform(windowManager)
                 }
             }
 
@@ -686,35 +452,24 @@ class MainActivity : AppCompatActivity() {
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 isDragging = false
-                // Применяем зум только после завершения перетаскивания
-                if (zoomSupported) {
-                    val camera = getCameraInstance(type)
-                    camera.updateZoom(camera.zoomValue)
-                }
+                // Применяем финальный кроп
+                wideCameraInstance.configureTransform(windowManager)
             }
         }
     }
 
-    private fun showAboutDialog() {
-        val dialogBuilder = AlertDialog.Builder(this)
-        dialogBuilder.setTitle("Моя 3D Камера")
-        dialogBuilder.setMessage(
-            "Приложение для создания 3D-фотографий с использованием двух камер\n\n" +
-                    "Версия: 0.3\n\n" +
-                    "Особенности:\n" +
-                    "- Непрерывный автофокус для обеих камер\n" +
-                    "- Независимое управление зумом\n\n" +
-                    "Текущие настройки зума:\n" +
-                    "Широкоугольная камера: ${
-                        String.format(
-                            "%.1fx",
-                            wideCameraInstance.zoomValue
-                        )
-                    }\n" +
-                    "Основная камера: ${String.format("%.1fx", mainCameraInstance.zoomValue)}"
-        )
-        dialogBuilder.setPositiveButton("OK", null)
-        dialogBuilder.show()
+    // Настройка ползунка для кропа
+    private fun setupCropControls() {
+        // Настраиваем ползунок для широкоугольной камеры
+        binding.wideCropSeekBar.setOnSeekBarChangeListener(createCropSeekBarListener())
+
+        // Устанавливаем начальную позицию ползунка
+        if (cropSupported) {
+            binding.wideCropSeekBar.progress = ((wideCameraInstance.cropValue - minCrop) / (maxCrop - minCrop) * 100).toInt()
+            binding.wideCropValue.text = String.format("%.1fx", wideCameraInstance.cropValue)
+            // Применяем начальную трансформацию
+            wideCameraInstance.configureTransform(windowManager)
+        }
     }
 
     // Устанавливаем TextureView Listeners
@@ -737,34 +492,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     // Проверяем, доступны ли все текстуры
     private fun areAllTexturesAvailable(): Boolean {
         return wideCameraInstance.isTextureAvailable && mainCameraInstance.isTextureAvailable
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == CAMERA_PERMISSION_REQUEST) {
-            if (!allPermissionsGranted()) {
-                Toast.makeText(
-                    this,
-                    "Разрешения не получены",
-                    Toast.LENGTH_SHORT
-                ).show()
-                finish()
-            }
-        }
-    }
-
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(
-            baseContext, it
-        ) == PackageManager.PERMISSION_GRANTED
     }
 
     override fun onDestroy() {
@@ -777,48 +507,32 @@ class MainActivity : AppCompatActivity() {
         mainCameraInstance.close()
     }
 
-    // Добавляем метод для сохранения настроек зума
-    private fun saveZoomSettings() {
-        val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = sharedPreferences.edit()
-
-        // Сохраняем настройки для каждой камеры
-        editor.putFloat(
-            CameraInstance.getZoomPrefsKey(CameraType.WIDE),
-            wideCameraInstance.zoomValue
-        )
-        editor.putFloat(
-            CameraInstance.getZoomPrefsKey(CameraType.MAIN),
-            mainCameraInstance.zoomValue
-        )
-
-        editor.apply()
-        Log.d(
-            TAG,
-            "Сохранены настройки зума: широкоугольная=${wideCameraInstance.zoomValue}x, основная=${mainCameraInstance.zoomValue}x"
-        )
+    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+        ContextCompat.checkSelfPermission(
+            baseContext, it
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Добавляем метод для восстановления настроек зума
-    private fun restoreZoomSettings() {
+    // Добавляем метод для сохранения настроек кропа
+    private fun saveCropSettings() {
         val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = sharedPreferences.edit()
+        editor.putFloat(WIDE_CROP_KEY, wideCameraInstance.cropValue)
+        editor.apply()
+        Log.d(TAG, "Сохранены настройки кропа: широкоугольная=${wideCameraInstance.cropValue}x")
+    }
 
-        // Восстанавливаем настройки для каждой камеры
-        wideCameraInstance.zoomValue =
-            sharedPreferences.getFloat(CameraInstance.getZoomPrefsKey(CameraType.WIDE), 1.0f)
-        mainCameraInstance.zoomValue =
-            sharedPreferences.getFloat(CameraInstance.getZoomPrefsKey(CameraType.MAIN), 1.5f)
-
-        Log.d(
-            TAG,
-            "Восстановлены настройки зума: широкоугольная=${wideCameraInstance.zoomValue}x, основная=${mainCameraInstance.zoomValue}x"
-        )
+    // Добавляем метод для восстановления настроек кропа
+    private fun restoreCropSettings() {
+        val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        wideCameraInstance.cropValue = sharedPreferences.getFloat(WIDE_CROP_KEY, 1.0f)
+        Log.d(TAG, "Восстановлены настройки кропа: широкоугольная=${wideCameraInstance.cropValue}x")
     }
 
     override fun onPause() {
         super.onPause()
-        // Сохраняем настройки зума при закрытии приложения
-        saveZoomSettings()
+        // Сохраняем настройки кропа при закрытии приложения
+        saveCropSettings()
     }
 
     private fun setupAvailableCameras() {
@@ -840,26 +554,6 @@ class MainActivity : AppCompatActivity() {
                 val focalLength = focalLengths?.get(0) ?: 0f
                 val physicalCameras = characteristics?.physicalCameraIds ?: emptySet()
 
-                // Получаем доступные значения зума
-                val zoomRatios = if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    characteristics?.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        ?.let { range ->
-                            // Проверяем поддержку зума и сохраняем его диапазон
-                            if (range.lower < range.upper) {
-                                zoomSupported = true
-                                minZoom = range.lower
-                                maxZoom = range.upper
-                                Log.d(
-                                    TAG,
-                                    "Диапазон зума для камеры $id: ${range.lower} - ${range.upper}"
-                                )
-                            }
-                            listOf(range.lower, range.upper)
-                        } ?: emptyList()
-                } else {
-                    emptyList()
-                }
-
                 val facingStr = when (facing) {
                     CameraCharacteristics.LENS_FACING_BACK -> "Задняя"
                     CameraCharacteristics.LENS_FACING_FRONT -> "Передняя"
@@ -878,8 +572,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }мм)",
                     isLogical = isLogical,
-                    physicalIds = physicalCameras,
-                    zoomRatios = zoomRatios
+                    physicalIds = physicalCameras
                 )
 
                 Log.d(
@@ -905,7 +598,7 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(
                 TAG,
-                "Найдены камеры: ${availableCameras.map { "${it.description} (${it.zoomRatios})" }}"
+                "Найдены камеры: ${availableCameras.map { "${it.description} (${it.physicalIds})" }}"
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error setting up available cameras", e)
@@ -1015,16 +708,36 @@ class MainActivity : AppCompatActivity() {
 
                                 try {
                                     // Создаем единый запрос на предпросмотр
-                                    val previewRequest = session.device.createCaptureRequest(
-                                        CameraDevice.TEMPLATE_PREVIEW
+                                    previewRequestBuilder = session.device.createCaptureRequest(
+                                        CameraDevice.TEMPLATE_RECORD,
+                                        setOf(wideCameraInstance.physicalId, mainCameraInstance.physicalId)
                                     ).apply {
                                         // Добавляем обе поверхности как цели
                                         addTarget(wideCameraInstance.surface!!)
                                         addTarget(mainCameraInstance.surface!!)
-                                    }.build()
+                                        
+                                        // Настраиваем базовые параметры
+                                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                                        set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                                        
+                                        // Отключаем стабилизацию
+                                        set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                                        set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                                        
+                                        // Устанавливаем минимальный зум для основной камеры
+                                        mainCameraInstance.cropValue = minCrop
+                                        set(CaptureRequest.CONTROL_ZOOM_RATIO, minCrop)
+                                    }
 
+                                    captureSession = session
                                     // Устанавливаем повторяющийся запрос
-                                    session.setRepeatingRequest(previewRequest, null, cameraHandler)
+                                    session.setRepeatingRequest(
+                                        previewRequestBuilder!!.build(),
+                                        null,
+                                        cameraHandler
+                                    )
+                                    wideCameraInstance.configureTransform(windowManager)
                                     Log.d(TAG, "Предпросмотр запущен для обеих камер")
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Ошибка настройки предпросмотра: ${e.message}")
