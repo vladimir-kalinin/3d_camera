@@ -2,8 +2,12 @@ package com.example.my_3d_camera
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
@@ -14,11 +18,17 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
+import android.util.Size
 import android.view.Menu
 import android.view.MenuItem
 import android.view.Surface
@@ -30,9 +40,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.my_3d_camera.databinding.ActivityMainBinding
-import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -53,6 +64,9 @@ class MainActivity : AppCompatActivity() {
     private var minCrop: Float = 1.0f
     private var maxCrop: Float = 3.0f
     private var cropSupported: Boolean = true
+
+    // Переменные для съемки фото
+    private var isCapturing = false
 
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
@@ -330,6 +344,11 @@ class MainActivity : AppCompatActivity() {
 
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
+        // Настраиваем кнопку съемки
+        binding.captureButton.setOnClickListener {
+            capturePhoto()
+        }
+
         // Проверяем разрешения перед инициализацией камеры
         if (!allPermissionsGranted()) {
             requestPermissions()
@@ -499,6 +518,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        
         executor.shutdown()
         cameraThread.quitSafely()
 
@@ -533,6 +553,190 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         // Сохраняем настройки кропа при закрытии приложения
         saveCropSettings()
+    }
+
+    // Методы для съемки фото (простой подход через TextureView)
+    private fun capturePhoto() {
+        if (isCapturing) {
+            Log.d(TAG, "Съемка уже в процессе")
+            return
+        }
+
+        isCapturing = true
+        binding.captureButton.isEnabled = false
+
+        try {
+            // Захватываем кадры из TextureView обеих камер
+            val wideBitmap = wideCameraInstance.textureView?.getBitmap()
+            val mainBitmap = mainCameraInstance.textureView?.getBitmap()
+
+            if (wideBitmap != null && mainBitmap != null) {
+                Log.d(TAG, "Захвачены изображения: wide=${wideBitmap.width}x${wideBitmap.height}, main=${mainBitmap.width}x${mainBitmap.height}")
+                
+                // Сохраняем изображения в фоновом потоке
+                executor.execute {
+                    // Применяем кроп к широкоугольной камере
+                    val processedWideBitmap = applyCropToBitmap(wideBitmap, wideCameraInstance.cropValue)
+                    
+                    // Создаем SBS изображение
+                    val sbsBitmap = createSideBySideBitmap(processedWideBitmap, mainBitmap)
+                    
+                    if (sbsBitmap != null) {
+                        // Сохраняем SBS изображение
+                        saveSbsBitmap(sbsBitmap)
+                        
+                        // Освобождаем память
+                        processedWideBitmap.recycle()
+                        sbsBitmap.recycle()
+                        
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "3D фото сохранено в галерею", Toast.LENGTH_SHORT).show()
+                            resetCaptureState()
+                        }
+                    } else {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "Ошибка создания 3D фото", Toast.LENGTH_SHORT).show()
+                            resetCaptureState()
+                        }
+                    }
+                }
+            } else {
+                Log.e(TAG, "Не удалось захватить изображения из TextureView")
+                Toast.makeText(this, "Ошибка захвата изображения", Toast.LENGTH_SHORT).show()
+                resetCaptureState()
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при съемке фото", e)
+            Toast.makeText(this, "Ошибка съемки: ${e.message}", Toast.LENGTH_SHORT).show()
+            resetCaptureState()
+        }
+    }
+
+
+
+    private fun applyCropToBitmap(originalBitmap: Bitmap, cropFactor: Float): Bitmap {
+        try {
+            val originalWidth = originalBitmap.width
+            val originalHeight = originalBitmap.height
+            
+            // Вычисляем размеры обрезанной области
+            val croppedWidth = (originalWidth / cropFactor).toInt()
+            val croppedHeight = (originalHeight / cropFactor).toInt()
+            
+            // Вычисляем смещение для центрирования
+            val offsetX = (originalWidth - croppedWidth) / 2
+            val offsetY = (originalHeight - croppedHeight) / 2
+            
+            Log.d(TAG, "Применяем кроп ${cropFactor}x: ${originalWidth}x${originalHeight} -> ${croppedWidth}x${croppedHeight}")
+            
+            // Создаем обрезанный bitmap
+            val croppedBitmap = Bitmap.createBitmap(
+                originalBitmap,
+                offsetX,
+                offsetY,
+                croppedWidth,
+                croppedHeight
+            )
+            
+            return croppedBitmap
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка применения кропа: ${e.message}", e)
+            return originalBitmap
+        }
+    }
+
+    private fun createSideBySideBitmap(leftBitmap: Bitmap, rightBitmap: Bitmap): Bitmap? {
+        try {
+            // Определяем размеры для SBS изображения
+            val targetHeight = min(leftBitmap.height, rightBitmap.height)
+            val targetWidth = min(leftBitmap.width, rightBitmap.width)
+            
+            // Создаем SBS изображение (ширина удваивается)
+            val sbsWidth = targetWidth * 2
+            val sbsHeight = targetHeight
+            
+            Log.d(TAG, "Создаем SBS изображение: ${sbsWidth}x${sbsHeight}")
+            
+            val sbsBitmap = Bitmap.createBitmap(sbsWidth, sbsHeight, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(sbsBitmap)
+            
+            // Масштабируем и размещаем левое изображение (широкоугольная камера)
+            val leftScaledBitmap = Bitmap.createScaledBitmap(leftBitmap, targetWidth, targetHeight, true)
+            canvas.drawBitmap(leftScaledBitmap, 0f, 0f, null)
+            
+            // Масштабируем и размещаем правое изображение (основная камера)
+            val rightScaledBitmap = Bitmap.createScaledBitmap(rightBitmap, targetWidth, targetHeight, true)
+            canvas.drawBitmap(rightScaledBitmap, targetWidth.toFloat(), 0f, null)
+            
+            // Освобождаем временные bitmap
+            if (leftScaledBitmap != leftBitmap) leftScaledBitmap.recycle()
+            if (rightScaledBitmap != rightBitmap) rightScaledBitmap.recycle()
+            
+            Log.d(TAG, "SBS изображение создано успешно")
+            return sbsBitmap
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка создания SBS изображения: ${e.message}", e)
+            return null
+        }
+    }
+
+    private fun saveSbsBitmap(sbsBitmap: Bitmap) {
+        try {
+            // Конвертируем Bitmap в JPEG байты
+            val outputStream = java.io.ByteArrayOutputStream()
+            sbsBitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)
+            val imageBytes = outputStream.toByteArray()
+
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val filename = "3D_Camera_SBS_$timestamp.jpg"
+
+            Log.d(TAG, "Сохраняем SBS изображение: ${sbsBitmap.width}x${sbsBitmap.height}")
+
+            // Сохраняем в галерею
+            saveImageToGallery(imageBytes, filename, "SBS")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка сохранения SBS изображения", e)
+        }
+    }
+
+
+
+
+
+
+
+    private fun resetCaptureState() {
+        isCapturing = false
+        binding.captureButton.isEnabled = true
+    }
+
+    private fun saveImageToGallery(imageBytes: ByteArray, filename: String, cameraType: String) {
+        try {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/3D_Camera")
+            }
+
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            
+            uri?.let {
+                contentResolver.openOutputStream(it)?.use { outputStream ->
+                    outputStream.write(imageBytes)
+                    outputStream.flush()
+                }
+                Log.d(TAG, "Изображение $cameraType сохранено в галерею: $filename")
+            } ?: run {
+                Log.e(TAG, "Не удалось создать URI для сохранения $cameraType")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка сохранения в галерею для $cameraType: ${e.message}", e)
+        }
     }
 
     private fun setupAvailableCameras() {
@@ -687,7 +891,7 @@ class MainActivity : AppCompatActivity() {
                         Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    // Создаем конфигурацию выходов для обеих камер
+                    // Создаем конфигурацию выходов только для предпросмотра
                     val outputs = listOf(
                         OutputConfiguration(wideCameraInstance.surface!!).apply {
                             setPhysicalCameraId(wideCameraInstance.physicalId!!)
