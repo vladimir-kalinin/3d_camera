@@ -48,6 +48,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
+import android.media.MediaRecorder
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -65,8 +66,14 @@ class MainActivity : AppCompatActivity() {
     private var maxCrop: Float = 3.0f
     private var cropSupported: Boolean = true
 
-    // Переменные для съемки фото
-    private var isCapturing = false
+    // Переменные для записи видео
+    private var isRecording = false
+    private var wideMediaRecorder: MediaRecorder? = null
+    private var mainMediaRecorder: MediaRecorder? = null
+    private var wideRecordingSurface: Surface? = null
+    private var mainRecordingSurface: Surface? = null
+    private var wideVideoOutputFile: String? = null
+    private var mainVideoOutputFile: String? = null
 
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
@@ -76,7 +83,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private val REQUIRED_PERMISSIONS = arrayOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.ACCESS_MEDIA_LOCATION
+            Manifest.permission.RECORD_AUDIO
         )
         private const val PREFS_NAME = "CameraCropPrefs"
         private const val WIDE_CROP_KEY = "wide_crop"
@@ -344,9 +351,10 @@ class MainActivity : AppCompatActivity() {
 
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-        // Настраиваем кнопку съемки
+        // Настраиваем кнопку записи видео
+        binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_green_dark))
         binding.captureButton.setOnClickListener {
-            capturePhoto()
+            toggleVideoRecording()
         }
 
         // Проверяем разрешения перед инициализацией камеры
@@ -360,12 +368,11 @@ class MainActivity : AppCompatActivity() {
     private fun requestPermissions() {
         when {
             shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) ||
-            shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) ||
-            shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE) -> {
+            shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> {
                 // Показываем диалог с объяснением, почему нужны разрешения
                 AlertDialog.Builder(this)
                     .setTitle("Необходимы разрешения")
-                    .setMessage("Для работы приложения требуется доступ к камере и хранилищу. Пожалуйста, предоставьте необходимые разрешения.")
+                    .setMessage("Для работы приложения требуется доступ к камере и микрофону для записи видео. Пожалуйста, предоставьте необходимые разрешения.")
                     .setPositiveButton("OK") { _, _ ->
                         ActivityCompat.requestPermissions(
                             this,
@@ -414,8 +421,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 // Проверяем, можно ли показать диалог повторно
                 if (shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) ||
-                    shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE) ||
-                    shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                    shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
                     requestPermissions()
                 } else {
                     // Пользователь отказал в разрешениях и выбрал "Больше не спрашивать"
@@ -519,6 +525,17 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         
+        // Останавливаем запись если активна
+        if (isRecording) {
+            stopVideoRecording()
+        }
+        
+        // Освобождаем MediaRecorder'ы
+        wideMediaRecorder?.release()
+        mainMediaRecorder?.release()
+        wideMediaRecorder = null
+        mainMediaRecorder = null
+        
         executor.shutdown()
         cameraThread.quitSafely()
 
@@ -555,187 +572,388 @@ class MainActivity : AppCompatActivity() {
         saveCropSettings()
     }
 
-    // Методы для съемки фото (простой подход через TextureView)
-    private fun capturePhoto() {
-        if (isCapturing) {
-            Log.d(TAG, "Съемка уже в процессе")
+    // Методы для записи видео
+    private fun toggleVideoRecording() {
+        if (isRecording) {
+            stopVideoRecording()
+        } else {
+            startVideoRecording()
+        }
+    }
+
+    private fun startVideoRecording() {
+        if (isRecording) {
+            Log.d(TAG, "Запись уже в процессе")
             return
         }
 
-        isCapturing = true
-        binding.captureButton.isEnabled = false
+        try {
+            // Подготавливаем MediaRecorder'ы для обеих камер
+            setupMediaRecorders()
+            
+            // Пересоздаем сессию камеры с поверхностями для записи
+            recreateSessionForRecording()
+            
+            // Запускаем запись на обеих камерах
+            wideMediaRecorder?.start()
+            mainMediaRecorder?.start()
+            isRecording = true
+            
+            // Обновляем UI
+            binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_red_dark))
+            
+            Log.d(TAG, "Запись видео начата с обеих камер")
+            Toast.makeText(this, "Запись 3D видео начата", Toast.LENGTH_SHORT).show()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при начале записи видео", e)
+            Toast.makeText(this, "Ошибка записи: ${e.message}", Toast.LENGTH_SHORT).show()
+            resetRecordingState()
+        }
+    }
+
+    private fun stopVideoRecording() {
+        if (!isRecording) {
+            Log.d(TAG, "Запись не активна")
+            return
+        }
 
         try {
-            // Захватываем кадры из TextureView обеих камер
-            val wideBitmap = wideCameraInstance.textureView?.getBitmap()
-            val mainBitmap = mainCameraInstance.textureView?.getBitmap()
-
-            if (wideBitmap != null && mainBitmap != null) {
-                Log.d(TAG, "Захвачены изображения: wide=${wideBitmap.width}x${wideBitmap.height}, main=${mainBitmap.width}x${mainBitmap.height}")
-                
-                // Сохраняем изображения в фоновом потоке
-                executor.execute {
-                    // Применяем кроп к широкоугольной камере
-                    val processedWideBitmap = applyCropToBitmap(wideBitmap, wideCameraInstance.cropValue)
-                    
-                    // Создаем SBS изображение
-                    val sbsBitmap = createSideBySideBitmap(processedWideBitmap, mainBitmap)
-                    
-                    if (sbsBitmap != null) {
-                        // Сохраняем SBS изображение
-                        saveSbsBitmap(sbsBitmap)
-                        
-                        // Освобождаем память
-                        processedWideBitmap.recycle()
-                        sbsBitmap.recycle()
-                        
-                        runOnUiThread {
-                            Toast.makeText(this@MainActivity, "3D фото сохранено в галерею", Toast.LENGTH_SHORT).show()
-                            resetCaptureState()
-                        }
-                    } else {
-                        runOnUiThread {
-                            Toast.makeText(this@MainActivity, "Ошибка создания 3D фото", Toast.LENGTH_SHORT).show()
-                            resetCaptureState()
-                        }
+            // Останавливаем запись на обеих камерах
+            wideMediaRecorder?.stop()
+            mainMediaRecorder?.stop()
+            wideMediaRecorder?.reset()
+            mainMediaRecorder?.reset()
+            
+            isRecording = false
+            
+            // Обновляем UI
+            binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_green_dark))
+            
+            Log.d(TAG, "Запись видео остановлена")
+            Log.d(TAG, "  Широкоугольная: $wideVideoOutputFile")
+            Log.d(TAG, "  Основная: $mainVideoOutputFile")
+            
+            // Проверяем и сохраняем оба файла
+            var savedCount = 0
+            
+            // Проверяем широкоугольное видео
+            val wideFile = java.io.File(wideVideoOutputFile ?: "")
+            if (wideFile.exists()) {
+                Log.d(TAG, "Широкоугольное видео: ${wideFile.absolutePath}, размер: ${wideFile.length()} байт")
+                addVideoToGallery(wideFile)
+                savedCount++
+            } else {
+                Log.e(TAG, "Широкоугольное видео не найдено: ${wideFile.absolutePath}")
+            }
+            
+            // Проверяем основное видео
+            val mainFile = java.io.File(mainVideoOutputFile ?: "")
+            if (mainFile.exists()) {
+                Log.d(TAG, "Основное видео: ${mainFile.absolutePath}, размер: ${mainFile.length()} байт")
+                addVideoToGallery(mainFile)
+                savedCount++
+            } else {
+                Log.e(TAG, "Основное видео не найдено: ${mainFile.absolutePath}")
+            }
+            
+            if (savedCount > 0) {
+                Toast.makeText(this, "Сохранено $savedCount 3D видео в галерею", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Ошибка: видео не созданы", Toast.LENGTH_SHORT).show()
+            }
+            
+            // Возвращаемся к обычному предпросмотру
+            recreateSessionForPreview()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при остановке записи видео", e)
+            Toast.makeText(this, "Ошибка остановки записи: ${e.message}", Toast.LENGTH_SHORT).show()
+            resetRecordingState()
+        }
+    }
+    
+    private fun addVideoToGallery(videoFile: java.io.File) {
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, videoFile.name)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES)
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { outputStream ->
+                    videoFile.inputStream().use { inputStream ->
+                        inputStream.copyTo(outputStream)
                     }
                 }
+                
+                values.clear()
+                values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                
+                Log.d(TAG, "Видео добавлено в галерею: $uri")
             } else {
-                Log.e(TAG, "Не удалось захватить изображения из TextureView")
-                Toast.makeText(this, "Ошибка захвата изображения", Toast.LENGTH_SHORT).show()
-                resetCaptureState()
+                Log.e(TAG, "Не удалось создать URI для галереи")
             }
-
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при съемке фото", e)
-            Toast.makeText(this, "Ошибка съемки: ${e.message}", Toast.LENGTH_SHORT).show()
-            resetCaptureState()
+            Log.e(TAG, "Ошибка добавления видео в галерею", e)
         }
     }
-
-
-
-    private fun applyCropToBitmap(originalBitmap: Bitmap, cropFactor: Float): Bitmap {
-        try {
-            val originalWidth = originalBitmap.width
-            val originalHeight = originalBitmap.height
-            
-            // Вычисляем размеры обрезанной области
-            val croppedWidth = (originalWidth / cropFactor).toInt()
-            val croppedHeight = (originalHeight / cropFactor).toInt()
-            
-            // Вычисляем смещение для центрирования
-            val offsetX = (originalWidth - croppedWidth) / 2
-            val offsetY = (originalHeight - croppedHeight) / 2
-            
-            Log.d(TAG, "Применяем кроп ${cropFactor}x: ${originalWidth}x${originalHeight} -> ${croppedWidth}x${croppedHeight}")
-            
-            // Создаем обрезанный bitmap
-            val croppedBitmap = Bitmap.createBitmap(
-                originalBitmap,
-                offsetX,
-                offsetY,
-                croppedWidth,
-                croppedHeight
-            )
-            
-            return croppedBitmap
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка применения кропа: ${e.message}", e)
-            return originalBitmap
+    
+    private fun setupMediaRecorders() {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val moviesDir = getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+        wideVideoOutputFile = "$moviesDir/3D_Video_Wide_$timestamp.mp4"
+        mainVideoOutputFile = "$moviesDir/3D_Video_Main_$timestamp.mp4"
+        
+        Log.d(TAG, "Настройка MediaRecorder'ов:")
+        Log.d(TAG, "  Папка Movies: $moviesDir")
+        Log.d(TAG, "  Широкоугольная: $wideVideoOutputFile")
+        Log.d(TAG, "  Основная: $mainVideoOutputFile")
+        
+        // Создаем папку если не существует
+        moviesDir?.mkdirs()
+        
+        // Получаем поддерживаемые размеры видео
+        val characteristics = cameraManager?.getCameraCharacteristics(logicalCameraId!!)
+        val streamConfigurationMap = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val videoSizes = streamConfigurationMap?.getOutputSizes(MediaRecorder::class.java)
+        
+        Log.d(TAG, "  Доступные размеры видео: ${videoSizes?.joinToString { "${it.width}x${it.height}" }}")
+        
+        // Выбираем максимальный размер для сохранения полного угла обзора
+        val preferredSize = videoSizes?.maxByOrNull { it.width * it.height }
+            ?: Size(1280, 720) // fallback
+        
+        // Получаем ориентацию дисплея для правильного поворота видео
+        val rotation = windowManager.defaultDisplay.rotation
+        val orientationHint = when (rotation) {
+            Surface.ROTATION_0 -> 90
+            Surface.ROTATION_90 -> 0
+            Surface.ROTATION_180 -> 270
+            Surface.ROTATION_270 -> 180
+            else -> 90
         }
-    }
-
-    private fun createSideBySideBitmap(leftBitmap: Bitmap, rightBitmap: Bitmap): Bitmap? {
-        try {
-            // Определяем размеры для SBS изображения
-            val targetHeight = min(leftBitmap.height, rightBitmap.height)
-            val targetWidth = min(leftBitmap.width, rightBitmap.width)
-            
-            // Создаем SBS изображение (ширина удваивается)
-            val sbsWidth = targetWidth * 2
-            val sbsHeight = targetHeight
-            
-            Log.d(TAG, "Создаем SBS изображение: ${sbsWidth}x${sbsHeight}")
-            
-            val sbsBitmap = Bitmap.createBitmap(sbsWidth, sbsHeight, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(sbsBitmap)
-            
-            // Масштабируем и размещаем левое изображение (широкоугольная камера)
-            val leftScaledBitmap = Bitmap.createScaledBitmap(leftBitmap, targetWidth, targetHeight, true)
-            canvas.drawBitmap(leftScaledBitmap, 0f, 0f, null)
-            
-            // Масштабируем и размещаем правое изображение (основная камера)
-            val rightScaledBitmap = Bitmap.createScaledBitmap(rightBitmap, targetWidth, targetHeight, true)
-            canvas.drawBitmap(rightScaledBitmap, targetWidth.toFloat(), 0f, null)
-            
-            // Освобождаем временные bitmap
-            if (leftScaledBitmap != leftBitmap) leftScaledBitmap.recycle()
-            if (rightScaledBitmap != rightBitmap) rightScaledBitmap.recycle()
-            
-            Log.d(TAG, "SBS изображение создано успешно")
-            return sbsBitmap
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка создания SBS изображения: ${e.message}", e)
-            return null
+        
+        Log.d(TAG, "  Выбранный размер видео: ${preferredSize.width}x${preferredSize.height}")
+        Log.d(TAG, "  Ориентация дисплея: $rotation, поворот видео: $orientationHint°")
+        
+        // Настраиваем MediaRecorder для широкоугольной камеры
+        wideMediaRecorder = MediaRecorder().apply {
+            setVideoSource(MediaRecorder.VideoSource.SURFACE)
+            setAudioSource(MediaRecorder.AudioSource.MIC)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setOutputFile(wideVideoOutputFile)
+            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setVideoSize(preferredSize.width, preferredSize.height)
+            setVideoFrameRate(30)
+            setVideoEncodingBitRate(12_000_000) // Увеличиваем битрейт для высокого разрешения
+            setAudioSamplingRate(44100)
+            setAudioEncodingBitRate(64000)
+            setOrientationHint(orientationHint) // Исправляем поворот видео
+            prepare()
         }
-    }
-
-    private fun saveSbsBitmap(sbsBitmap: Bitmap) {
-        try {
-            // Конвертируем Bitmap в JPEG байты
-            val outputStream = java.io.ByteArrayOutputStream()
-            sbsBitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)
-            val imageBytes = outputStream.toByteArray()
-
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val filename = "3D_Camera_SBS_$timestamp.jpg"
-
-            Log.d(TAG, "Сохраняем SBS изображение: ${sbsBitmap.width}x${sbsBitmap.height}")
-
-            // Сохраняем в галерею
-            saveImageToGallery(imageBytes, filename, "SBS")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка сохранения SBS изображения", e)
+        
+        // Настраиваем MediaRecorder для основной камеры
+        mainMediaRecorder = MediaRecorder().apply {
+            setVideoSource(MediaRecorder.VideoSource.SURFACE)
+            // Аудио только в одном файле, чтобы избежать конфликтов
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setOutputFile(mainVideoOutputFile)
+            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            setVideoSize(preferredSize.width, preferredSize.height)
+            setVideoFrameRate(30)
+            setVideoEncodingBitRate(12_000_000) // Увеличиваем битрейт для высокого разрешения
+            setOrientationHint(orientationHint) // Исправляем поворот видео
+            prepare()
         }
+        
+        wideRecordingSurface = wideMediaRecorder?.surface
+        mainRecordingSurface = mainMediaRecorder?.surface
+        Log.d(TAG, "Оба MediaRecorder'а настроены успешно")
     }
 
-
-
-
-
-
-
-    private fun resetCaptureState() {
-        isCapturing = false
-        binding.captureButton.isEnabled = true
+    private fun resetRecordingState() {
+        isRecording = false
+        binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_green_dark))
+        
+        wideMediaRecorder?.reset()
+        mainMediaRecorder?.reset()
     }
 
-    private fun saveImageToGallery(imageBytes: ByteArray, filename: String, cameraType: String) {
+    private fun recreateSessionForRecording() {
         try {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/3D_Camera")
+            captureSession?.close()
+            
+            if (dualCameraInfo != null && wideRecordingSurface != null && mainRecordingSurface != null) {
+                // Создаем конфигурацию выходов для предпросмотра и записи
+                val outputs = mutableListOf<OutputConfiguration>()
+                
+                // Добавляем поверхности для предпросмотра
+                outputs.add(OutputConfiguration(wideCameraInstance.surface!!).apply {
+                    setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                })
+                outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
+                    setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                })
+                
+                // Добавляем поверхности для записи видео с каждой камеры
+                outputs.add(OutputConfiguration(wideRecordingSurface!!).apply {
+                    setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                })
+                outputs.add(OutputConfiguration(mainRecordingSurface!!).apply {
+                    setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                })
+                
+                // Создаем конфигурацию сессии
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputs,
+                    executor,
+                    createRecordingSessionCallback()
+                )
+                
+                cameraDevice?.createCaptureSession(sessionConfig)
             }
-
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка пересоздания сессии для записи", e)
+        }
+    }
+    
+    private fun recreateSessionForPreview() {
+        try {
+            captureSession?.close()
             
-            uri?.let {
-                contentResolver.openOutputStream(it)?.use { outputStream ->
-                    outputStream.write(imageBytes)
-                    outputStream.flush()
+            if (dualCameraInfo != null) {
+                // Создаем конфигурацию выходов только для предпросмотра
+                val outputs = mutableListOf<OutputConfiguration>()
+                
+                outputs.add(OutputConfiguration(wideCameraInstance.surface!!).apply {
+                    setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                })
+                outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
+                    setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                })
+                
+                // Создаем конфигурацию сессии
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputs,
+                    executor,
+                    createPreviewSessionCallback()
+                )
+                
+                cameraDevice?.createCaptureSession(sessionConfig)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка пересоздания сессии для предпросмотра", e)
+        }
+    }
+
+    private fun createRecordingSessionCallback(): CameraCaptureSession.StateCallback {
+        return object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                Log.d(TAG, "Сессия камеры для записи настроена")
+                
+                try {
+                    // Создаем запрос для записи видео
+                    previewRequestBuilder = session.device.createCaptureRequest(
+                        CameraDevice.TEMPLATE_RECORD,
+                        setOf(wideCameraInstance.physicalId, mainCameraInstance.physicalId)
+                    ).apply {
+                        // Добавляем поверхности для предпросмотра
+                        addTarget(wideCameraInstance.surface!!)
+                        addTarget(mainCameraInstance.surface!!)
+                        
+                        // Добавляем поверхности для записи
+                        addTarget(wideRecordingSurface!!)
+                        addTarget(mainRecordingSurface!!)
+                        
+                        // Настройки для видео
+                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                        
+                        // Отключаем стабилизацию для синхронности между камерами
+                        set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                        
+                        // Отключаем оптическую стабилизацию если доступна
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                        }
+                    }
+                    
+                    captureSession = session
+                    session.setRepeatingRequest(
+                        previewRequestBuilder!!.build(),
+                        null,
+                        cameraHandler
+                    )
+                    
+                    Log.d(TAG, "Запрос для записи видео установлен")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка настройки записи видео: ${e.message}")
                 }
-                Log.d(TAG, "Изображение $cameraType сохранено в галерею: $filename")
-            } ?: run {
-                Log.e(TAG, "Не удалось создать URI для сохранения $cameraType")
             }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка сохранения в галерею для $cameraType: ${e.message}", e)
+            
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Ошибка настройки сессии для записи")
+            }
+        }
+    }
+    
+    private fun createPreviewSessionCallback(): CameraCaptureSession.StateCallback {
+        return object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                Log.d(TAG, "Сессия камеры для предпросмотра настроена")
+                
+                try {
+                    // Создаем обычный запрос для предпросмотра
+                    previewRequestBuilder = session.device.createCaptureRequest(
+                        CameraDevice.TEMPLATE_PREVIEW,
+                        setOf(wideCameraInstance.physicalId, mainCameraInstance.physicalId)
+                    ).apply {
+                        addTarget(wideCameraInstance.surface!!)
+                        addTarget(mainCameraInstance.surface!!)
+                        
+                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                        
+                        // Отключаем стабилизацию для синхронности между камерами
+                        set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                        
+                        // Отключаем оптическую стабилизацию если доступна
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                        }
+                    }
+                    
+                    captureSession = session
+                    session.setRepeatingRequest(
+                        previewRequestBuilder!!.build(),
+                        null,
+                        cameraHandler
+                    )
+                    
+                    wideCameraInstance.configureTransform(windowManager)
+                    Log.d(TAG, "Предпросмотр восстановлен")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка настройки предпросмотра: ${e.message}")
+                }
+            }
+            
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "Ошибка настройки сессии для предпросмотра")
+            }
         }
     }
 
@@ -858,6 +1076,8 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+
+
     private fun openCamera() {
         if (!areAllTexturesAvailable()) {
             Log.d(TAG, "TextureView не готовы")
@@ -892,67 +1112,22 @@ class MainActivity : AppCompatActivity() {
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
                     // Создаем конфигурацию выходов только для предпросмотра
-                    val outputs = listOf(
-                        OutputConfiguration(wideCameraInstance.surface!!).apply {
-                            setPhysicalCameraId(wideCameraInstance.physicalId!!)
-                        },
-                        OutputConfiguration(mainCameraInstance.surface!!).apply {
-                            setPhysicalCameraId(mainCameraInstance.physicalId!!)
-                        }
-                    )
+                    val outputs = mutableListOf<OutputConfiguration>()
+                    
+                    // Добавляем поверхности для предпросмотра
+                    outputs.add(OutputConfiguration(wideCameraInstance.surface!!).apply {
+                        setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                    })
+                    outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
+                        setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                    })
 
                     // Создаем конфигурацию сессии
                     val sessionConfig = SessionConfiguration(
                         SessionConfiguration.SESSION_REGULAR,
                         outputs,
                         executor,
-                        object : CameraCaptureSession.StateCallback() {
-                            override fun onConfigured(session: CameraCaptureSession) {
-                                Log.d(TAG, "Сессия камеры настроена")
-
-                                try {
-                                    // Создаем единый запрос на предпросмотр
-                                    previewRequestBuilder = session.device.createCaptureRequest(
-                                        CameraDevice.TEMPLATE_RECORD,
-                                        setOf(wideCameraInstance.physicalId, mainCameraInstance.physicalId)
-                                    ).apply {
-                                        // Добавляем обе поверхности как цели
-                                        addTarget(wideCameraInstance.surface!!)
-                                        addTarget(mainCameraInstance.surface!!)
-                                        
-                                        // Настраиваем базовые параметры
-                                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-                                        set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                                        set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-                                        
-                                        // Отключаем стабилизацию
-                                        set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-                                        set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
-                                        
-                                        // Устанавливаем минимальный зум для основной камеры
-                                        mainCameraInstance.cropValue = minCrop
-                                        set(CaptureRequest.CONTROL_ZOOM_RATIO, minCrop)
-                                    }
-
-                                    captureSession = session
-                                    // Устанавливаем повторяющийся запрос
-                                    session.setRepeatingRequest(
-                                        previewRequestBuilder!!.build(),
-                                        null,
-                                        cameraHandler
-                                    )
-                                    wideCameraInstance.configureTransform(windowManager)
-                                    Log.d(TAG, "Предпросмотр запущен для обеих камер")
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Ошибка настройки предпросмотра: ${e.message}")
-                                    e.printStackTrace()
-                                }
-                            }
-
-                            override fun onConfigureFailed(session: CameraCaptureSession) {
-                                Log.e(TAG, "Ошибка настройки сессии камеры")
-                            }
-                        }
+                        createPreviewSessionCallback()
                     )
 
                     // Открываем логическую камеру

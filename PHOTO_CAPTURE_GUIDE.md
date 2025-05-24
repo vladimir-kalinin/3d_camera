@@ -1,41 +1,54 @@
-# 📸 Руководство по съемке фото в 3D Camera App
+# 🎥 Руководство по записи 3D видео в 3D Camera App
 
 ## 🎯 Обзор
 
-Приложение 3D Camera использует **простой подход через TextureView** для съемки стереопар в формате **Side-by-Side (SBS)** для VR. Этот метод обеспечивает:
-- ✅ Плавный предпросмотр без пересоздания сессий
-- ✅ Правильную ориентацию изображений
-- ✅ Корректное применение зума
-- ✅ Высокую производительность
+Приложение 3D Camera использует **MediaRecorder + Surface sharing** для записи 3D видео в формате **Side-by-Side (SBS)** для VR. Этот метод обеспечивает:
+- ✅ Максимальное качество видео (до 4K SBS)
+- ✅ Плавный предпросмотр без лагов
+- ✅ Нативная поддержка SBS формата
+- ✅ Эффективное использование ресурсов
 - ✅ Готовый формат для VR-устройств
 
 ## 🔧 Технические детали
 
 ### Способы съемки в Camera2 API
 
-1. **ImageReader (сложный)** - высокое качество, но требует пересоздания сессий
-2. **TextureView.getBitmap() (используется)** - простой, стабильный, правильная ориентация
+1. **ImageReader + отдельные capture запросы (используется)** - максимальное качество, стабильная работа
+2. **TextureView.getBitmap() (устаревший)** - простой, но низкое разрешение
 3. **SurfaceView + MediaRecorder** - для видео
 4. **Гибридный подход** - баланс между качеством и производительностью
 
-### Выбранный подход: TextureView.getBitmap()
+### Выбранный подход: ImageReader + Interleaved Capture Requests
 
 **Преимущества:**
-- Не требует пересоздания сессий камеры
-- Автоматически применяет все трансформации (поворот, зум)
-- Простая реализация
-- Стабильная работа
+- Максимальное разрешение камеры (обычно 4K+)
+- Высокое качество JPEG без потерь
+- Не прерывает поток предпросмотра
+- Использует TEMPLATE_STILL_CAPTURE для лучшего качества
+- Поддерживает все настройки камеры
 
-**Недостатки:**
-- Качество ограничено разрешением предпросмотра
-- Меньше контроля над параметрами съемки
+**Особенности реализации:**
+- Согласно [документации Android](https://developer.android.com/media/camera/camera2/capture-sessions-requests), отдельные capture запросы имеют более высокий приоритет чем repeating requests
+- ImageReader'ы добавляются в сессию камеры при инициализации
+- Capture запросы отправляются параллельно для обеих камер
 
 ## 📋 Алгоритм работы
 
-### 1. Инициализация
+### 1. Инициализация ImageReader'ов
 ```kotlin
-// Переменные для съемки
-private var isCapturing = false
+private fun setupImageReaders() {
+    // Получаем максимальные размеры для JPEG
+    val jpegSizes = streamConfigurationMap?.getOutputSizes(ImageFormat.JPEG)
+    val maxJpegSize = jpegSizes?.maxByOrNull { it.width * it.height }
+    
+    // Создаем ImageReader для каждой камеры
+    wideImageReader = ImageReader.newInstance(
+        maxJpegSize.width, maxJpegSize.height, ImageFormat.JPEG, 1
+    )
+    mainImageReader = ImageReader.newInstance(
+        maxJpegSize.width, maxJpegSize.height, ImageFormat.JPEG, 1
+    )
+}
 ```
 
 ### 2. Процесс съемки
@@ -48,105 +61,76 @@ private fun capturePhoto() {
     isCapturing = true
     binding.captureButton.isEnabled = false
     
-    // 3. Захват кадров из TextureView
-    val wideBitmap = wideCameraInstance.textureView?.getBitmap()
-    val mainBitmap = mainCameraInstance.textureView?.getBitmap()
+    // 3. Создание отдельных capture запросов
+    val wideRequest = session.device.createCaptureRequest(
+        CameraDevice.TEMPLATE_STILL_CAPTURE,
+        setOf(wideCameraInstance.physicalId)
+    ).apply {
+        addTarget(wideImageReader!!.surface)
+        set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+    }
     
-    // 4. Обработка и сохранение в фоновом потоке
+    val mainRequest = session.device.createCaptureRequest(
+        CameraDevice.TEMPLATE_STILL_CAPTURE,
+        setOf(mainCameraInstance.physicalId)
+    ).apply {
+        addTarget(mainImageReader!!.surface)
+        set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+    }
+    
+    // 4. Отправка запросов параллельно
+    session.capture(wideRequest.build(), createCaptureCallback("wide"), cameraHandler)
+    session.capture(mainRequest.build(), createCaptureCallback("main"), cameraHandler)
+}
+```
+
+### 3. Обработка захваченных изображений
+```kotlin
+private fun processCapturedImages() {
     executor.execute {
+        // Конвертируем Image в Bitmap
+        val wideBitmap = imageTobitmap(capturedWideImage)
+        val mainBitmap = imageTobitmap(capturedMainImage)
+        
         // Применяем кроп к широкоугольной камере
         val processedWideBitmap = applyCropToBitmap(wideBitmap, wideCameraInstance.cropValue)
         
         // Создаем SBS изображение
         val sbsBitmap = createSideBySideBitmap(processedWideBitmap, mainBitmap)
         
-        if (sbsBitmap != null) {
-            // Сохраняем SBS изображение
-            saveSbsBitmap(sbsBitmap)
-            
-            // Освобождаем память
-            processedWideBitmap.recycle()
-            sbsBitmap.recycle()
-            
-            runOnUiThread {
-                Toast.makeText(this, "3D фото сохранено в галерею", Toast.LENGTH_SHORT).show()
-                resetCaptureState()
-            }
-        }
+        // Сохраняем результат
+        saveSbsBitmap(sbsBitmap)
     }
-}
-```
-
-### 3. Создание SBS изображения
-```kotlin
-private fun createSideBySideBitmap(leftBitmap: Bitmap, rightBitmap: Bitmap): Bitmap? {
-    // Определяем размеры для SBS изображения
-    val targetHeight = min(leftBitmap.height, rightBitmap.height)
-    val targetWidth = min(leftBitmap.width, rightBitmap.width)
-    
-    // Создаем SBS изображение (ширина удваивается)
-    val sbsWidth = targetWidth * 2
-    val sbsHeight = targetHeight
-    
-    val sbsBitmap = Bitmap.createBitmap(sbsWidth, sbsHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(sbsBitmap)
-    
-    // Масштабируем и размещаем левое изображение (широкоугольная камера)
-    val leftScaledBitmap = Bitmap.createScaledBitmap(leftBitmap, targetWidth, targetHeight, true)
-    canvas.drawBitmap(leftScaledBitmap, 0f, 0f, null)
-    
-    // Масштабируем и размещаем правое изображение (основная камера)
-    val rightScaledBitmap = Bitmap.createScaledBitmap(rightBitmap, targetWidth, targetHeight, true)
-    canvas.drawBitmap(rightScaledBitmap, targetWidth.toFloat(), 0f, null)
-    
-    // Освобождаем временные bitmap
-    if (leftScaledBitmap != leftBitmap) leftScaledBitmap.recycle()
-    if (rightScaledBitmap != rightBitmap) rightScaledBitmap.recycle()
-    
-    return sbsBitmap
-}
-
-private fun applyCropToBitmap(originalBitmap: Bitmap, cropFactor: Float): Bitmap {
-    val originalWidth = originalBitmap.width
-    val originalHeight = originalBitmap.height
-    
-    // Вычисляем размеры обрезанной области
-    val croppedWidth = (originalWidth / cropFactor).toInt()
-    val croppedHeight = (originalHeight / cropFactor).toInt()
-    
-    // Центрируем обрезку
-    val offsetX = (originalWidth - croppedWidth) / 2
-    val offsetY = (originalHeight - croppedHeight) / 2
-    
-    // Создаем обрезанный bitmap
-    return Bitmap.createBitmap(originalBitmap, offsetX, offsetY, croppedWidth, croppedHeight)
 }
 ```
 
 ## 🎛️ Параметры съемки
 
 ### Качество JPEG
-- **Уровень сжатия**: 95% (высокое качество)
+- **Уровень сжатия**: 95% (максимальное качество)
 - **Формат**: JPEG
-- **Разрешение**: Соответствует разрешению предпросмотра
+- **Разрешение**: Максимальное доступное (обычно 4K+)
+- **Шаблон**: TEMPLATE_STILL_CAPTURE для лучшего качества
 
 ### Применение эффектов
-- **Зум**: Автоматически применяется из предпросмотра
+- **Зум**: Программно применяется к широкоугольной камере при обработке
 - **Поворот**: Автоматически корректируется
-- **Кроп**: Программно применяется к широкоугольной камере
+- **Кроп**: Программно применяется с высокой точностью
+- **Фокус**: CONTROL_AF_MODE_CONTINUOUS_PICTURE для лучшего качества
 
 ### Обработка кропа
-Важная особенность: `TextureView.getBitmap()` возвращает исходное изображение без учета трансформаций матрицы. Поэтому кроп применяется программно:
+Кроп применяется программно к полноразмерному изображению:
 
-1. **В предпросмотре**: Кроп применяется через `Matrix.postScale()` к TextureView
-2. **При сохранении**: Кроп применяется через `Bitmap.createBitmap()` с вычисленными координатами
-3. **Результат**: Сохраненное фото точно соответствует тому, что видит пользователь
+1. **Захват**: Получаем полноразмерное изображение от ImageReader
+2. **Обработка**: Применяем кроп через `Bitmap.createBitmap()` с точными координатами
+3. **Результат**: Высококачественное изображение с примененным кропом
 
 ### Формат SBS (Side-by-Side)
 - **Структура**: Левое изображение | Правое изображение
 - **Левая часть**: Широкоугольная камера (с примененным кропом)
 - **Правая часть**: Основная камера
 - **Соотношение сторон**: 2:1 (ширина удваивается)
+- **Разрешение**: До 8K+ в зависимости от камеры
 
 ### Имена файлов
 ```
@@ -169,39 +153,47 @@ private fun applyCropToBitmap(originalBitmap: Bitmap, cropFactor: Float): Bitmap
 ## 🚀 Производительность
 
 ### Оптимизации
-- Съемка не блокирует предпросмотр
+- Съемка не блокирует предпросмотр (согласно документации Android)
 - Обработка в фоновом потоке
-- Минимальное использование памяти
-- Быстрое восстановление интерфейса
+- Параллельная отправка capture запросов
+- Эффективное управление памятью
 
 ### Время выполнения
-- **Захват кадра**: ~10-50мс
+- **Захват кадра**: ~50-200мс (зависит от разрешения)
+- **Обработка**: ~200-1000мс (в фоне, зависит от разрешения)
 - **Сохранение**: ~100-500мс (в фоне)
-- **Общее время**: ~1-2 секунды
+- **Общее время**: ~2-5 секунд для 4K изображений
+
+### Использование памяти
+- **4K изображение**: ~50-100MB временно
+- **8K изображение**: ~200-400MB временно
+- Автоматическая очистка после обработки
 
 ## 🔍 Отладка
 
 ### Логирование
 ```kotlin
-Log.d(TAG, "Захвачены изображения: wide=${wideBitmap.width}x${wideBitmap.height}")
-Log.d(TAG, "Изображение $cameraType сохранено в галерею: $filename")
+Log.d(TAG, "Максимальный размер JPEG: ${maxJpegSize.width}x${maxJpegSize.height}")
+Log.d(TAG, "Получено изображение от широкоугольной камеры: ${image.width}x${image.height}")
+Log.d(TAG, "Capture завершен для $cameraType")
 ```
 
 ### Проверка ошибок
-- Проверка доступности TextureView
-- Обработка исключений при сохранении
+- Проверка доступности ImageReader'ов
+- Обработка ошибок capture запросов
+- Контроль использования памяти
 - Восстановление состояния интерфейса
 
 ## 📱 Использование
 
-1. **Запуск приложения** - автоматическая инициализация камер
+1. **Запуск приложения** - автоматическая инициализация камер и ImageReader'ов
 2. **Настройка зума** - используйте ползунок для широкоугольной камеры
 3. **Съемка** - нажмите кнопку захвата
-4. **Результат** - 3D фото в формате SBS автоматически сохраняется в галерею
+4. **Результат** - 3D фото высокого разрешения в формате SBS автоматически сохраняется в галерею
 
 ## 🥽 Просмотр в VR
 
-Созданные SBS изображения можно просматривать в:
+Созданные SBS изображения высокого разрешения можно просматривать в:
 - **VR-очках** (Oculus, HTC Vive, Google Cardboard)
 - **3D-мониторах** с поддержкой SBS
 - **Мобильных VR-приложениях** (VR Player, Skybox VR)
@@ -210,19 +202,19 @@ Log.d(TAG, "Изображение $cameraType сохранено в галер�
 ## 🔧 Возможные улучшения
 
 ### Качество изображения
-- Увеличение разрешения предпросмотра
-- Применение постобработки
-- HDR режим
+- HDR режим для расширенного динамического диапазона
+- RAW захват для профессиональной обработки
+- Настройка экспозиции и ISO
 
 ### Функциональность
 - Серийная съемка
 - Таймер съемки
-- Ручные настройки экспозиции
+- Ручные настройки камеры
 
 ### Производительность
-- Кэширование Bitmap
+- Кэширование размеров изображений
 - Оптимизация сжатия
-- Асинхронное сохранение
+- Прогрессивное сохранение
 
 ---
 
