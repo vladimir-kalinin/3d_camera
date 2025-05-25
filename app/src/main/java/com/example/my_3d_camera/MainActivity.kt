@@ -74,6 +74,9 @@ class MainActivity : AppCompatActivity() {
     private var mainRecordingSurface: Surface? = null
     private var wideVideoOutputFile: String? = null
     private var mainVideoOutputFile: String? = null
+    
+    // SBS видео процессор
+    private lateinit var sbsProcessor: SBSVideoProcessor
 
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
@@ -338,6 +341,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Инициализируем SBS процессор
+        sbsProcessor = SBSVideoProcessor(this)
+
         // Устанавливаем соотношение сторон для превью
         binding.previewsContainer.post {
             val width = binding.previewsContainer.width
@@ -355,6 +361,11 @@ class MainActivity : AppCompatActivity() {
         binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_green_dark))
         binding.captureButton.setOnClickListener {
             toggleVideoRecording()
+        }
+
+        // Настраиваем кнопку создания SBS
+        binding.sbsButton.setOnClickListener {
+            showSBSCreationDialog()
         }
 
         // Проверяем разрешения перед инициализацией камеры
@@ -659,6 +670,40 @@ class MainActivity : AppCompatActivity() {
             
             if (savedCount > 0) {
                 Toast.makeText(this, "Сохранено $savedCount 3D видео в галерею", Toast.LENGTH_LONG).show()
+                
+                // Если оба видео сохранены, создаем SBS версию
+                if (savedCount == 2 && wideFile.exists() && mainFile.exists()) {
+                    sbsProcessor.createSBSVideo(
+                        wideFile.absolutePath, 
+                        mainFile.absolutePath,
+                        object : SBSVideoProcessor.SBSProcessingCallback {
+                            override fun onProcessingStarted() {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Создание SBS видео...", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            
+                            override fun onProcessingProgress(progress: Int) {
+                                runOnUiThread {
+                                    // Можно добавить ProgressBar если нужно
+                                    Log.d(TAG, "Прогресс SBS: $progress%")
+                                }
+                            }
+                            
+                            override fun onProcessingCompleted(outputFile: java.io.File) {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "SBS видео создано! Проверьте галерею", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            
+                            override fun onProcessingFailed(error: String) {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Ошибка создания SBS видео: $error", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                }
             } else {
                 Toast.makeText(this, "Ошибка: видео не созданы", Toast.LENGTH_SHORT).show()
             }
@@ -705,6 +750,60 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    private fun showSBSCreationDialog() {
+        val videoPairs = sbsProcessor.findVideoPairs()
+        
+        if (videoPairs.isEmpty()) {
+            Toast.makeText(this, "Нет парных видео для создания SBS", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // Создаем диалог выбора
+        val pairNames = videoPairs.map { it.getDisplayName() }.toTypedArray()
+        
+        AlertDialog.Builder(this)
+            .setTitle("Выберите видео для создания SBS")
+            .setItems(pairNames) { _, which ->
+                val selectedPair = videoPairs[which]
+                if (selectedPair.isValid()) {
+                    sbsProcessor.createSBSVideo(
+                        selectedPair.wideVideo.absolutePath,
+                        selectedPair.mainVideo.absolutePath,
+                        object : SBSVideoProcessor.SBSProcessingCallback {
+                            override fun onProcessingStarted() {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Создание SBS видео...", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            
+                            override fun onProcessingProgress(progress: Int) {
+                                runOnUiThread {
+                                    // Можно добавить ProgressBar если нужно
+                                    Log.d(TAG, "Прогресс SBS: $progress%")
+                                }
+                            }
+                            
+                            override fun onProcessingCompleted(outputFile: java.io.File) {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "SBS видео создано! Проверьте галерею", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            
+                            override fun onProcessingFailed(error: String) {
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Ошибка создания SBS видео: $error", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                } else {
+                    Toast.makeText(this, "Выбранные файлы недоступны", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun setupMediaRecorders() {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val moviesDir = getExternalFilesDir(Environment.DIRECTORY_MOVIES)
@@ -1075,8 +1174,6 @@ class MainActivity : AppCompatActivity() {
 
         return null
     }
-
-
 
     private fun openCamera() {
         if (!areAllTexturesAvailable()) {
