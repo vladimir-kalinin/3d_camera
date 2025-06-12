@@ -35,6 +35,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -49,6 +50,7 @@ import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 import android.media.MediaRecorder
+import com.arthenica.ffmpegkit.FFmpegKit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -87,6 +89,7 @@ class MainActivity : AppCompatActivity() {
         )
         private const val PREFS_NAME = "CameraCropPrefs"
         private const val WIDE_CROP_KEY = "wide_crop"
+        private const val SBS_ORDER_KEY = "sbs_wide_on_left"
     }
 
     data class CameraInfo(
@@ -346,9 +349,6 @@ class MainActivity : AppCompatActivity() {
             binding.previewsContainer.layoutParams = params
         }
 
-        // Восстанавливаем настройки кропа
-        restoreCropSettings()
-
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         // Настраиваем кнопку записи видео
@@ -356,6 +356,21 @@ class MainActivity : AppCompatActivity() {
         binding.captureButton.setOnClickListener {
             toggleVideoRecording()
         }
+        
+        // Настраиваем переключатель порядка SBS
+        setupSBSOrderSwitch()
+        
+        // Настраиваем кнопку отмены обработки
+        binding.cancelProcessingButton.setOnClickListener {
+            // Пока что просто скрываем индикатор
+            showProcessingIndicator(false)
+            Toast.makeText(this, "Обработка отменена", Toast.LENGTH_SHORT).show()
+        }
+        
+
+        
+        // Восстанавливаем настройки после инициализации UI
+        restoreSettings()
 
         // Проверяем разрешения перед инициализацией камеры
         if (!allPermissionsGranted()) {
@@ -496,6 +511,21 @@ class MainActivity : AppCompatActivity() {
             wideCameraInstance.configureTransform(windowManager)
         }
     }
+    
+    // Настройка переключателя порядка SBS
+    private fun setupSBSOrderSwitch() {
+        binding.sbsOrderSwitch.setOnCheckedChangeListener { _, isChecked ->
+            // Обновляем описание в зависимости от состояния переключателя
+            val description = if (isChecked) {
+                "Включено: Широкоугольная слева, Основная справа"
+            } else {
+                "Выключено: Основная слева, Широкоугольная справа"
+            }
+            
+            binding.sbsOrderDescription.text = description
+            Log.d(TAG, "Порядок SBS изменен: $description")
+        }
+    }
 
     // Устанавливаем TextureView Listeners
     private fun setupTextureViewListeners() {
@@ -550,26 +580,32 @@ class MainActivity : AppCompatActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Добавляем метод для сохранения настроек кропа
-    private fun saveCropSettings() {
+    // Добавляем метод для сохранения настроек
+    private fun saveSettings() {
         val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val editor = sharedPreferences.edit()
         editor.putFloat(WIDE_CROP_KEY, wideCameraInstance.cropValue)
+        editor.putBoolean(SBS_ORDER_KEY, binding.sbsOrderSwitch.isChecked)
         editor.apply()
-        Log.d(TAG, "Сохранены настройки кропа: широкоугольная=${wideCameraInstance.cropValue}x")
+        Log.d(TAG, "Сохранены настройки: кроп=${wideCameraInstance.cropValue}x, SBS порядок=${binding.sbsOrderSwitch.isChecked}")
     }
 
-    // Добавляем метод для восстановления настроек кропа
-    private fun restoreCropSettings() {
+    // Добавляем метод для восстановления настроек
+    private fun restoreSettings() {
         val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         wideCameraInstance.cropValue = sharedPreferences.getFloat(WIDE_CROP_KEY, 1.0f)
-        Log.d(TAG, "Восстановлены настройки кропа: широкоугольная=${wideCameraInstance.cropValue}x")
+        val sbsOrder = sharedPreferences.getBoolean(SBS_ORDER_KEY, true)
+        
+        // Восстанавливаем состояние переключателя после инициализации UI
+        binding.sbsOrderSwitch.isChecked = sbsOrder
+        
+        Log.d(TAG, "Восстановлены настройки: кроп=${wideCameraInstance.cropValue}x, SBS порядок=$sbsOrder")
     }
 
     override fun onPause() {
         super.onPause()
-        // Сохраняем настройки кропа при закрытии приложения
-        saveCropSettings()
+        // Сохраняем настройки при закрытии приложения
+        saveSettings()
     }
 
     // Методы для записи видео
@@ -634,33 +670,42 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "  Широкоугольная: $wideVideoOutputFile")
             Log.d(TAG, "  Основная: $mainVideoOutputFile")
             
-            // Проверяем и сохраняем оба файла
-            var savedCount = 0
-            
-            // Проверяем широкоугольное видео
+            // Проверяем существование файлов
             val wideFile = java.io.File(wideVideoOutputFile ?: "")
-            if (wideFile.exists()) {
-                Log.d(TAG, "Широкоугольное видео: ${wideFile.absolutePath}, размер: ${wideFile.length()} байт")
-                addVideoToGallery(wideFile)
-                savedCount++
-            } else {
-                Log.e(TAG, "Широкоугольное видео не найдено: ${wideFile.absolutePath}")
-            }
-            
-            // Проверяем основное видео
             val mainFile = java.io.File(mainVideoOutputFile ?: "")
-            if (mainFile.exists()) {
-                Log.d(TAG, "Основное видео: ${mainFile.absolutePath}, размер: ${mainFile.length()} байт")
-                addVideoToGallery(mainFile)
-                savedCount++
-            } else {
-                Log.e(TAG, "Основное видео не найдено: ${mainFile.absolutePath}")
-            }
             
-            if (savedCount > 0) {
-                Toast.makeText(this, "Сохранено $savedCount 3D видео в галерею", Toast.LENGTH_LONG).show()
+            if (wideFile.exists() && mainFile.exists()) {
+                Log.d(TAG, "Оба видео файла найдены")
+                Log.d(TAG, "  Широкоугольное: ${wideFile.absolutePath}, размер: ${wideFile.length()} байт")
+                Log.d(TAG, "  Основное: ${mainFile.absolutePath}, размер: ${mainFile.length()} байт")
+                
+                // Сначала сохраняем исходные видео в галерею
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                Log.d(TAG, "Сохраняем исходные видео в галерею перед сшиванием...")
+                saveSourceVideosToGallery(wideFile, mainFile, timestamp)
+                Toast.makeText(this, "Исходные видео сохранены в галерею!", Toast.LENGTH_SHORT).show()
+                
+                Log.d(TAG, "Начинаем сшивание в 3D SBS")
+                // Показываем индикатор прогресса
+                showProcessingIndicator(true)
+                
+                // Запускаем сшивание в фоновом потоке
+                Thread {
+                    stitchVideosToSBS(wideFile, mainFile)
+                }.start()
+                
             } else {
-                Toast.makeText(this, "Ошибка: видео не созданы", Toast.LENGTH_SHORT).show()
+                Log.e(TAG, "Один или оба видео файла не найдены")
+                if (!wideFile.exists()) {
+                    Log.e(TAG, "Широкоугольное видео не найдено: ${wideFile.absolutePath}")
+                }
+                if (!mainFile.exists()) {
+                    Log.e(TAG, "Основное видео не найдено: ${mainFile.absolutePath}")
+                }
+                
+                runOnUiThread {
+                    Toast.makeText(this, "Ошибка: видео файлы не созданы", Toast.LENGTH_SHORT).show()
+                }
             }
             
             // Возвращаемся к обычному предпросмотру
@@ -673,10 +718,90 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun addVideoToGallery(videoFile: java.io.File) {
+    private fun stitchVideosToSBS(wideFile: java.io.File, mainFile: java.io.File) {
+        try {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val moviesDir = getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            val outputFile = java.io.File(moviesDir, "3D_SBS_Video_$timestamp.mp4")
+            
+            // Проверяем настройку порядка камер
+            val wideOnLeft = binding.sbsOrderSwitch.isChecked
+            
+            val leftFile: java.io.File
+            val rightFile: java.io.File
+            val leftDescription: String
+            val rightDescription: String
+            
+            if (wideOnLeft) {
+                leftFile = wideFile
+                rightFile = mainFile
+                leftDescription = "широкоугольное"
+                rightDescription = "основное"
+            } else {
+                leftFile = mainFile
+                rightFile = wideFile
+                leftDescription = "основное"
+                rightDescription = "широкоугольное"
+            }
+            
+            Log.d(TAG, "Начинаем сшивание видео в SBS формат")
+            Log.d(TAG, "  Левое ($leftDescription): ${leftFile.absolutePath}")
+            Log.d(TAG, "  Правое ($rightDescription): ${rightFile.absolutePath}")
+            Log.d(TAG, "  Выходной файл: ${outputFile.absolutePath}")
+            
+            // FFmpeg команда для создания Side-by-Side видео
+            // Используем совместимый H.264 кодек
+            val ffmpegCommand = "-i \"${leftFile.absolutePath}\" -i \"${rightFile.absolutePath}\" -filter_complex \"[0:v][1:v]hstack\" -c:v hevc_mediacodec -b:v 50M -maxrate 20M -bufsize 25M -y \"${outputFile.absolutePath}\""
+
+            Log.d(TAG, "FFmpeg команда: $ffmpegCommand")
+            
+            // Выполняем FFmpeg команду
+            val session = FFmpegKit.execute(ffmpegCommand)
+            val returnCode = session.returnCode
+            val output = session.output
+            val failStackTrace = session.failStackTrace
+            
+            Log.d(TAG, "FFmpeg завершен с кодом: $returnCode")
+            
+            runOnUiThread {
+                // Скрываем индикатор прогресса
+                showProcessingIndicator(false)
+                
+                if (returnCode.isValueSuccess) {
+                    Log.d(TAG, "Сшивание видео успешно завершено")
+                    Log.d(TAG, "Размер итогового файла: ${outputFile.length()} байт")
+                    
+                    // Добавляем сшитое видео в галерею
+                    addVideoToGallery(outputFile, "3D_SBS_Video_$timestamp.mp4")
+                    
+                    // Удаляем исходные файлы для экономии места (теперь они сохранены в галерее)
+                    cleanupSourceFiles(wideFile, mainFile)
+                    
+                    Toast.makeText(this@MainActivity, "3D SBS видео сохранено в галерею!", Toast.LENGTH_LONG).show()
+                } else {
+                    Log.e(TAG, "Ошибка сшивания видео")
+                    Log.e(TAG, "FFmpeg output: $output")
+                    if (failStackTrace != null) {
+                        Log.e(TAG, "FFmpeg error: $failStackTrace")
+                    }
+                    
+                    Toast.makeText(this@MainActivity, "Ошибка создания 3D видео", Toast.LENGTH_SHORT).show()
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Исключение при сшивании видео", e)
+            runOnUiThread {
+                showProcessingIndicator(false)
+                Toast.makeText(this@MainActivity, "Ошибка обработки видео: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    private fun addVideoToGallery(videoFile: java.io.File, displayName: String = videoFile.name) {
         try {
             val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, videoFile.name)
+                put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                 put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES)
                 put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -704,6 +829,53 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Ошибка добавления видео в галерею", e)
         }
     }
+    
+    private fun saveSourceVideosToGallery(wideFile: java.io.File, mainFile: java.io.File, timestamp: String) {
+        try {
+            Log.d(TAG, "Сохраняем исходные видео в галерею...")
+            
+            // Сохраняем широкоугольное видео
+            val wideDisplayName = "3D_Wide_Camera_$timestamp.mp4"
+            addVideoToGallery(wideFile, wideDisplayName)
+            Log.d(TAG, "Широкоугольное видео сохранено в галерею: $wideDisplayName")
+            
+            // Сохраняем видео с основной камеры
+            val mainDisplayName = "3D_Main_Camera_$timestamp.mp4"
+            addVideoToGallery(mainFile, mainDisplayName)
+            Log.d(TAG, "Видео с основной камеры сохранено в галерею: $mainDisplayName")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка сохранения исходных видео в галерею", e)
+        }
+    }
+    
+    private fun cleanupSourceFiles(wideFile: java.io.File, mainFile: java.io.File) {
+        try {
+            if (wideFile.exists() && wideFile.delete()) {
+                Log.d(TAG, "Удален исходный файл широкоугольной камеры")
+            }
+            if (mainFile.exists() && mainFile.delete()) {
+                Log.d(TAG, "Удален исходный файл основной камеры")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка удаления исходных файлов", e)
+        }
+    }
+    
+    private fun showProcessingIndicator(show: Boolean) {
+        binding.processingContainer.visibility = if (show) {
+            android.view.View.VISIBLE
+        } else {
+            android.view.View.GONE
+        }
+        
+        // Блокируем/разблокируем кнопку записи во время обработки
+        binding.captureButton.isEnabled = !show
+        
+        Log.d(TAG, if (show) "Показан индикатор обработки" else "Скрыт индикатор обработки")
+    }
+    
+
     
     private fun setupMediaRecorders() {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -749,11 +921,11 @@ class MainActivity : AppCompatActivity() {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(wideVideoOutputFile)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             setVideoSize(preferredSize.width, preferredSize.height)
             setVideoFrameRate(30)
-            setVideoEncodingBitRate(12_000_000) // Увеличиваем битрейт для высокого разрешения
+            setVideoEncodingBitRate(20_000_000) // Увеличиваем битрейт для высокого разрешения
             setAudioSamplingRate(44100)
             setAudioEncodingBitRate(64000)
             setOrientationHint(orientationHint) // Исправляем поворот видео
@@ -766,10 +938,10 @@ class MainActivity : AppCompatActivity() {
             // Аудио только в одном файле, чтобы избежать конфликтов
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(mainVideoOutputFile)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
             setVideoSize(preferredSize.width, preferredSize.height)
             setVideoFrameRate(30)
-            setVideoEncodingBitRate(12_000_000) // Увеличиваем битрейт для высокого разрешения
+            setVideoEncodingBitRate(20_000_000) // Увеличиваем битрейт для высокого разрешения
             setOrientationHint(orientationHint) // Исправляем поворот видео
             prepare()
         }
