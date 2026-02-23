@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
@@ -50,6 +51,7 @@ import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 import android.media.MediaRecorder
+import android.media.ImageReader
 import com.arthenica.ffmpegkit.FFmpegKit
 
 class MainActivity : AppCompatActivity() {
@@ -76,6 +78,14 @@ class MainActivity : AppCompatActivity() {
     private var mainRecordingSurface: Surface? = null
     private var wideVideoOutputFile: String? = null
     private var mainVideoOutputFile: String? = null
+
+    // Переменные для съемки фото
+    private var wideImageReader: ImageReader? = null
+    private var mainImageReader: ImageReader? = null
+    private var pendingWideBitmap: Bitmap? = null
+    private var pendingMainBitmap: Bitmap? = null
+    @Volatile
+    private var isTakingPhoto: Boolean = false
 
     private val cameraThread = HandlerThread("CameraThread").apply { start() }
     private val cameraHandler = Handler(cameraThread.looper)
@@ -345,7 +355,9 @@ class MainActivity : AppCompatActivity() {
         binding.previewsContainer.post {
             val width = binding.previewsContainer.width
             val params = binding.previewsContainer.layoutParams
-            params.height = width / 2 // соотношение 2:1
+            // Две портретные камеры 3:4 рядом → общий контейнер 2:3
+            // Каждое превью ≈ (width/2) x (width*2/3) → аспект 3:4, как у итогового фото
+            params.height = (width * 2) / 3
             binding.previewsContainer.layoutParams = params
         }
 
@@ -355,6 +367,10 @@ class MainActivity : AppCompatActivity() {
         binding.captureButton.setBackgroundColor(getColor(android.R.color.holo_green_dark))
         binding.captureButton.setOnClickListener {
             toggleVideoRecording()
+        }
+        // Кнопка для съемки 3D фото
+        binding.photoButton.setOnClickListener {
+            takeSbsPhoto()
         }
         
         // Настраиваем переключатель порядка SBS
@@ -479,7 +495,7 @@ class MainActivity : AppCompatActivity() {
                     wideCameraInstance.cropValue = newCrop
                     
                     // Обновляем текст кропа
-                    binding.wideCropValue.text = String.format("%.1fx", newCrop)
+                    binding.wideCropValue.text = String.format("%.3fx", newCrop)
 
                     // Применяем кроп через трансформацию
                     wideCameraInstance.configureTransform(windowManager)
@@ -572,6 +588,11 @@ class MainActivity : AppCompatActivity() {
         // Используем новый метод закрытия камер
         wideCameraInstance.close()
         mainCameraInstance.close()
+
+        wideImageReader?.close()
+        mainImageReader?.close()
+        wideImageReader = null
+        mainImageReader = null
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
@@ -797,6 +818,347 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun setupImageReaders() {
+        if (logicalCameraId == null) return
+        try {
+            // Пытаемся подобрать общий размер JPEG, который поддерживают обе физические камеры
+            val dual = dualCameraInfo
+            val size: Size = if (dual != null) {
+                val wideChars = cameraManager?.getCameraCharacteristics(dual.widePhysicalId)
+                val mainChars = cameraManager?.getCameraCharacteristics(dual.mainPhysicalId)
+
+                val wideMap = wideChars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val mainMap = mainChars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+                val wideJpegSizes = wideMap?.getOutputSizes(ImageFormat.JPEG)?.toSet() ?: emptySet()
+                val mainJpegSizes = mainMap?.getOutputSizes(ImageFormat.JPEG)?.toSet() ?: emptySet()
+
+                val commonSizes = wideJpegSizes.intersect(mainJpegSizes)
+
+                val chosen = commonSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: wideJpegSizes.minByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: mainJpegSizes.minByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: Size(1920, 1080)
+
+                Log.d(
+                    TAG,
+                    "ImageReaders common JPEG size: ${chosen.width}x${chosen.height}, " +
+                            "wideCount=${wideJpegSizes.size}, mainCount=${mainJpegSizes.size}"
+                )
+                chosen
+            } else {
+                val characteristics = cameraManager?.getCameraCharacteristics(logicalCameraId!!)
+                val map = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)
+                val fallback = jpegSizes?.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: Size(1920, 1080)
+                Log.d(TAG, "ImageReaders JPEG size (no dual info): ${fallback.width}x${fallback.height}")
+                fallback
+            }
+
+            wideImageReader?.close()
+            mainImageReader?.close()
+
+            wideImageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+            mainImageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+
+            wideImageReader?.setOnImageAvailableListener({ reader ->
+                onWideImageAvailable(reader)
+            }, cameraHandler)
+
+            mainImageReader?.setOnImageAvailableListener({ reader ->
+                onMainImageAvailable(reader)
+            }, cameraHandler)
+
+            Log.d(TAG, "ImageReader настроены: ${size.width}x${size.height}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка настройки ImageReader", e)
+        }
+    }
+
+    private fun takeSbsPhoto() {
+        if (cameraDevice == null || captureSession == null) {
+            Toast.makeText(this, "Камера не готова", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (wideImageReader == null || mainImageReader == null) {
+            setupImageReaders()
+        }
+        if (wideImageReader == null || mainImageReader == null) {
+            Toast.makeText(this, "Невозможно настроить фото-выходы", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isTakingPhoto) {
+            Toast.makeText(this, "Фото уже создается", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        isTakingPhoto = true
+        pendingWideBitmap = null
+        pendingMainBitmap = null
+
+        runOnUiThread {
+            binding.processingText.text = "Создание 3D SBS фото..."
+            showProcessingIndicator(true)
+        }
+
+        try {
+            val requestBuilder = cameraDevice!!.createCaptureRequest(
+                CameraDevice.TEMPLATE_STILL_CAPTURE,
+                setOf(wideCameraInstance.physicalId, mainCameraInstance.physicalId)
+            ).apply {
+                wideImageReader?.surface?.let { addTarget(it) }
+                mainImageReader?.surface?.let { addTarget(it) }
+                applyFixedInfinityFocus(this)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                // Отключаем стабилизацию, чтобы FOV не "гулял" от кадра к кадру
+                set(
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    set(
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                    )
+                }
+            }
+
+            captureSession?.capture(
+                requestBuilder.build(),
+                object : CameraCaptureSession.CaptureCallback() {},
+                cameraHandler
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при создании фото", e)
+            runOnUiThread {
+                showProcessingIndicator(false)
+                Toast.makeText(this, "Ошибка фото: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+            isTakingPhoto = false
+        }
+    }
+
+    private fun onWideImageAvailable(reader: ImageReader) {
+        try {
+            val image = reader.acquireNextImage() ?: return
+            val buffer = image.planes[0].buffer
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            Log.d(TAG, "Wide JPEG bitmap size: ${decoded.width}x${decoded.height}")
+            image.close()
+            pendingWideBitmap = decoded
+            tryFinishSbsPhoto()
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка чтения изображения с широкой камеры", e)
+        }
+    }
+
+    private fun onMainImageAvailable(reader: ImageReader) {
+        try {
+            val image = reader.acquireNextImage() ?: return
+            val buffer = image.planes[0].buffer
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            Log.d(TAG, "Main JPEG bitmap size: ${decoded.width}x${decoded.height}")
+            image.close()
+            pendingMainBitmap = decoded
+            tryFinishSbsPhoto()
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка чтения изображения с основной камеры", e)
+        }
+    }
+
+    private fun tryFinishSbsPhoto() {
+        val wideBitmap = pendingWideBitmap
+        val mainBitmap = pendingMainBitmap
+        if (wideBitmap == null || mainBitmap == null) return
+
+        pendingWideBitmap = null
+        pendingMainBitmap = null
+
+        cameraHandler.post {
+            try {
+                val rotationDegrees = getPhotoRotationDegrees()
+
+                val rotatedWide = rotateBitmap(wideBitmap, rotationDegrees)
+                val rotatedMain = rotateBitmap(mainBitmap, rotationDegrees)
+
+                // Применяем кроп для широкоугольного снимка в соответствии с ползунком
+                val cropFactor = wideCameraInstance.cropValue
+                val wideForUse = if (cropFactor > 1.0f) {
+                    cropBitmapCenter(rotatedWide, cropFactor)
+                } else {
+                    rotatedWide
+                }
+
+                val wideOnLeft = binding.sbsOrderSwitch.isChecked
+
+                val leftBitmap = if (wideOnLeft) wideForUse else rotatedMain
+                val rightBitmap = if (wideOnLeft) rotatedMain else wideForUse
+
+                Log.d(
+                    TAG,
+                    "SBS photo original bitmaps: left=${leftBitmap.width}x${leftBitmap.height}, " +
+                            "right=${rightBitmap.width}x${rightBitmap.height}, wideOnLeft=$wideOnLeft"
+                )
+
+                val targetHeight = max(leftBitmap.height, rightBitmap.height)
+
+                fun scaleToHeight(src: Bitmap): Bitmap {
+                    val scale = targetHeight.toFloat() / src.height
+                    val width = (src.width * scale).toInt()
+                    return Bitmap.createScaledBitmap(src, width, targetHeight, true)
+                }
+
+                var leftScaled = scaleToHeight(leftBitmap)
+                var rightScaled = scaleToHeight(rightBitmap)
+
+                Log.d(
+                    TAG,
+                    "SBS photo scaled bitmaps (before width match): left=${leftScaled.width}x${leftScaled.height}, " +
+                            "right=${rightScaled.width}x${rightScaled.height}, targetHeight=$targetHeight"
+                )
+
+                // Приводим обе половины к одинаковой ширине масштабированием, без дополнительного кропа
+                val targetWidth = max(leftScaled.width, rightScaled.width)
+
+                if (leftScaled.width != targetWidth) {
+                    leftScaled = Bitmap.createScaledBitmap(leftScaled, targetWidth, targetHeight, true)
+                }
+                if (rightScaled.width != targetWidth) {
+                    rightScaled = Bitmap.createScaledBitmap(rightScaled, targetWidth, targetHeight, true)
+                }
+
+                Log.d(
+                    TAG,
+                    "SBS photo scaled bitmaps (after width match): left=${leftScaled.width}x${leftScaled.height}, " +
+                            "right=${rightScaled.width}x${rightScaled.height}, targetHeight=$targetHeight"
+                )
+
+                val resultWidth = leftScaled.width + rightScaled.width
+                val resultBitmap = Bitmap.createBitmap(resultWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(resultBitmap)
+                canvas.drawBitmap(leftScaled, 0f, 0f, null)
+                canvas.drawBitmap(rightScaled, leftScaled.width.toFloat(), 0f, null)
+
+                saveSbsPhotoToGallery(resultBitmap)
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при создании SBS фото", e)
+                runOnUiThread {
+                    showProcessingIndicator(false)
+                    Toast.makeText(this, "Ошибка обработки фото: ${e.message}", Toast.LENGTH_SHORT).show()
+                    isTakingPhoto = false
+                }
+            }
+        }
+    }
+
+    private fun getPhotoRotationDegrees(): Int {
+        val rotation = windowManager.defaultDisplay.rotation
+        return when (rotation) {
+            Surface.ROTATION_0 -> 90
+            Surface.ROTATION_90 -> 0
+            Surface.ROTATION_180 -> 270
+            Surface.ROTATION_270 -> 180
+            else -> 90
+        }
+    }
+
+    private fun rotateBitmap(src: Bitmap, degrees: Int): Bitmap {
+        if (degrees == 0) return src
+        val matrix = android.graphics.Matrix()
+        matrix.postRotate(degrees.toFloat())
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+    }
+
+    private fun cropBitmapCenter(src: Bitmap, cropFactor: Float): Bitmap {
+        if (cropFactor <= 1.0f) return src
+
+        val factor = cropFactor.coerceAtMost(5.0f) // защитимся от слишком больших значений
+        val newWidth = (src.width / factor).toInt().coerceAtLeast(1)
+        val newHeight = (src.height / factor).toInt().coerceAtLeast(1)
+
+        val left = ((src.width - newWidth) / 2f).toInt().coerceAtLeast(0)
+        val top = ((src.height - newHeight) / 2f).toInt().coerceAtLeast(0)
+
+        val safeWidth = min(newWidth, src.width - left)
+        val safeHeight = min(newHeight, src.height - top)
+
+        Log.d(
+            TAG,
+            "Crop wide bitmap center: src=${src.width}x${src.height}, factor=$factor, " +
+                    "rect=($left,$top,$safeWidth,$safeHeight)"
+        )
+
+        return Bitmap.createBitmap(src, left, top, safeWidth, safeHeight)
+    }
+
+    private fun saveSbsPhotoToGallery(bitmap: Bitmap) {
+        try {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val name = "3D_SBS_Photo_$timestamp.jpg"
+
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
+                }
+
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+
+                runOnUiThread {
+                    showProcessingIndicator(false)
+                    Toast.makeText(this, "3D SBS фото сохранено в галерею!", Toast.LENGTH_LONG).show()
+                    isTakingPhoto = false
+                }
+            } else {
+                runOnUiThread {
+                    showProcessingIndicator(false)
+                    Toast.makeText(this, "Ошибка сохранения фото", Toast.LENGTH_SHORT).show()
+                    isTakingPhoto = false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка сохранения SBS фото", e)
+            runOnUiThread {
+                showProcessingIndicator(false)
+                Toast.makeText(this, "Ошибка сохранения фото: ${e.message}", Toast.LENGTH_SHORT).show()
+                isTakingPhoto = false
+            }
+        }
+    }
+
+
+    private fun applyFixedInfinityFocus(builder: CaptureRequest.Builder) {
+        try {
+            // Отключаем автофокус
+            builder.set(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_OFF
+            )
+
+            // Ставим фокус на "бесконечность" (0 диоптрий)
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+
+            Log.d(TAG, "Применен фиксированный фокус на бесконечность")
+        } catch (e: Exception) {
+            Log.e(TAG, "Не удалось применить фиксированный фокус", e)
+        }
+    }
     
     private fun addVideoToGallery(videoFile: java.io.File, displayName: String = videoFile.name) {
         try {
@@ -974,6 +1336,18 @@ class MainActivity : AppCompatActivity() {
                 outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
                     setPhysicalCameraId(mainCameraInstance.physicalId!!)
                 })
+
+                // Добавляем поверхности для фото
+                wideImageReader?.surface?.let { surface ->
+                    outputs.add(OutputConfiguration(surface).apply {
+                        setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                    })
+                }
+                mainImageReader?.surface?.let { surface ->
+                    outputs.add(OutputConfiguration(surface).apply {
+                        setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                    })
+                }
                 
                 // Добавляем поверхности для записи видео с каждой камеры
                 outputs.add(OutputConfiguration(wideRecordingSurface!!).apply {
@@ -1003,6 +1377,9 @@ class MainActivity : AppCompatActivity() {
             captureSession?.close()
             
             if (dualCameraInfo != null) {
+                if (wideImageReader == null || mainImageReader == null) {
+                    setupImageReaders()
+                }
                 // Создаем конфигурацию выходов только для предпросмотра
                 val outputs = mutableListOf<OutputConfiguration>()
                 
@@ -1012,6 +1389,18 @@ class MainActivity : AppCompatActivity() {
                 outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
                     setPhysicalCameraId(mainCameraInstance.physicalId!!)
                 })
+
+                // Добавляем поверхности для фото
+                wideImageReader?.surface?.let { surface ->
+                    outputs.add(OutputConfiguration(surface).apply {
+                        setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                    })
+                }
+                mainImageReader?.surface?.let { surface ->
+                    outputs.add(OutputConfiguration(surface).apply {
+                        setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                    })
+                }
                 
                 // Создаем конфигурацию сессии
                 val sessionConfig = SessionConfiguration(
@@ -1048,7 +1437,7 @@ class MainActivity : AppCompatActivity() {
                         addTarget(mainRecordingSurface!!)
                         
                         // Настройки для видео
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                        applyFixedInfinityFocus(this)
                         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                         
@@ -1095,7 +1484,7 @@ class MainActivity : AppCompatActivity() {
                         addTarget(wideCameraInstance.surface!!)
                         addTarget(mainCameraInstance.surface!!)
                         
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                        applyFixedInfinityFocus(this)
                         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                         
@@ -1278,6 +1667,10 @@ class MainActivity : AppCompatActivity() {
                 wideCameraInstance.prepareSurface()
                 mainCameraInstance.prepareSurface()
 
+                if (wideImageReader == null || mainImageReader == null) {
+                    setupImageReaders()
+                }
+
                 if (ActivityCompat.checkSelfPermission(
                         this,
                         Manifest.permission.CAMERA
@@ -1293,6 +1686,18 @@ class MainActivity : AppCompatActivity() {
                     outputs.add(OutputConfiguration(mainCameraInstance.surface!!).apply {
                         setPhysicalCameraId(mainCameraInstance.physicalId!!)
                     })
+
+                    // Добавляем поверхности для фото
+                    wideImageReader?.surface?.let { surface ->
+                        outputs.add(OutputConfiguration(surface).apply {
+                            setPhysicalCameraId(wideCameraInstance.physicalId!!)
+                        })
+                    }
+                    mainImageReader?.surface?.let { surface ->
+                        outputs.add(OutputConfiguration(surface).apply {
+                            setPhysicalCameraId(mainCameraInstance.physicalId!!)
+                        })
+                    }
 
                     // Создаем конфигурацию сессии
                     val sessionConfig = SessionConfiguration(
