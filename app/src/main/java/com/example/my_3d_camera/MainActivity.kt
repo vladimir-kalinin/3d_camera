@@ -927,7 +927,11 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 wideImageReader?.surface?.let { addTarget(it) }
                 mainImageReader?.surface?.let { addTarget(it) }
-                applyFixedInfinityFocus(this)
+                // Возвращаем автофокус для фото
+                set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                )
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 // Отключаем стабилизацию, чтобы FOV не "гулял" от кадра к кадру
                 set(
@@ -1161,23 +1165,6 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun applyFixedInfinityFocus(builder: CaptureRequest.Builder) {
-        try {
-            // Отключаем автофокус
-            builder.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_OFF
-            )
-
-            // Ставим фокус на "бесконечность" (0 диоптрий)
-            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
-
-            Log.d(TAG, "Применен фиксированный фокус на бесконечность")
-        } catch (e: Exception) {
-            Log.e(TAG, "Не удалось применить фиксированный фокус", e)
-        }
-    }
-    
     private fun addVideoToGallery(videoFile: java.io.File, displayName: String = videoFile.name) {
         try {
             val values = ContentValues().apply {
@@ -1454,8 +1441,11 @@ class MainActivity : AppCompatActivity() {
                         addTarget(wideRecordingSurface!!)
                         addTarget(mainRecordingSurface!!)
                         
-                        // Настройки для видео
-                        applyFixedInfinityFocus(this)
+                        // Настройки для видео: возвращаем непрерывный автофокус
+                        set(
+                            CaptureRequest.CONTROL_AF_MODE,
+                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                        )
                         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                         
@@ -1503,7 +1493,11 @@ class MainActivity : AppCompatActivity() {
                         addTarget(wideCameraInstance.surface!!)
                         addTarget(mainCameraInstance.surface!!)
                         
-                        applyFixedInfinityFocus(this)
+                        // Непрерывный автофокус для предпросмотра
+                        set(
+                            CaptureRequest.CONTROL_AF_MODE,
+                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                        )
                         set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                         set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                         
