@@ -163,6 +163,21 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
+        /** Устанавливает размер буфера превью в optimal size под текущий размер view. Вызывать в openCamera после prepareSurface. */
+        fun preparePreviewBuffer(): Boolean {
+            val tv = textureView ?: return false
+            val ch = characteristics ?: return false
+            val w = tv.width
+            val h = tv.height
+            if (w <= 0 || h <= 0) return false
+            val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+            val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return false
+            val optimal = chooseOptimalSize(sizes, w, h)
+            setBufferSize(optimal.width, optimal.height)
+            Log.d(TAG, "preparePreviewBuffer ${getDescription(type)}: view=${w}x${h}, buffer=${optimal.width}x${optimal.height}")
+            return true
+        }
+
         fun configureTransform(windowManager: WindowManager) {
             val textureView = this.textureView ?: return
             val viewWidth = textureView.width
@@ -242,7 +257,10 @@ class MainActivity : AppCompatActivity() {
             }.maxByOrNull { it.width * it.height } ?: choices.first()
         }
 
-        fun setupTextureListener(onTexturesReady: () -> Unit): TextureView.SurfaceTextureListener {
+        fun setupTextureListener(
+            onTexturesReady: () -> Unit,
+            onTransformNeeded: (() -> Unit)? = null
+        ): TextureView.SurfaceTextureListener {
             return object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(
                     texture: SurfaceTexture,
@@ -268,13 +286,7 @@ class MainActivity : AppCompatActivity() {
                         "onSurfaceTextureSizeChanged: ${getDescription(type)}, width=$width, height=$height"
                     )
                     if (characteristics != null) {
-                        val streamConfigurationMap = characteristics?.get(
-                            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-                        ) ?: return
-                        val previewSizes =
-                            streamConfigurationMap.getOutputSizes(SurfaceTexture::class.java)
-                        val optimalSize = chooseOptimalSize(previewSizes, width, height)
-                        setBufferSize(optimalSize.width, optimalSize.height)
+                        onTransformNeeded?.invoke()
                     }
                 }
 
@@ -549,17 +561,23 @@ class MainActivity : AppCompatActivity() {
         wideCameraInstance.textureView = binding.viewFinderWide
         mainCameraInstance.textureView = binding.viewFinder
 
-        // Настраиваем слушатели для обеих камер
+        val onTransformNeeded = {
+            runOnUiThread {
+                wideCameraInstance.configureTransform(windowManager)
+                mainCameraInstance.configureTransform(windowManager)
+            }
+        }
         wideCameraInstance.textureView?.surfaceTextureListener =
-            wideCameraInstance.setupTextureListener { checkAndOpenCamera() }
-
+            wideCameraInstance.setupTextureListener({ checkAndOpenCamera() }, onTransformNeeded)
         mainCameraInstance.textureView?.surfaceTextureListener =
-            mainCameraInstance.setupTextureListener { checkAndOpenCamera() }
+            mainCameraInstance.setupTextureListener({ checkAndOpenCamera() }, onTransformNeeded)
     }
 
     private fun checkAndOpenCamera() {
         if (areAllTexturesAvailable()) {
-            openCamera()
+            // Откладываем открытие камеры на следующий layout pass, чтобы контейнер
+            // успел применить высоту 2:3 и оба видоискателя получили финальные размеры
+            binding.previewsContainer.post { openCamera() }
         }
     }
 
@@ -1456,7 +1474,8 @@ class MainActivity : AppCompatActivity() {
                         null,
                         cameraHandler
                     )
-                    
+                    wideCameraInstance.configureTransform(windowManager)
+                    mainCameraInstance.configureTransform(windowManager)
                     Log.d(TAG, "Запрос для записи видео установлен")
                     
                 } catch (e: Exception) {
@@ -1503,8 +1522,8 @@ class MainActivity : AppCompatActivity() {
                         null,
                         cameraHandler
                     )
-                    
                     wideCameraInstance.configureTransform(windowManager)
+                    mainCameraInstance.configureTransform(windowManager)
                     Log.d(TAG, "Предпросмотр восстановлен")
                     
                 } catch (e: Exception) {
@@ -1666,6 +1685,8 @@ class MainActivity : AppCompatActivity() {
                 // Подготавливаем поверхности заранее
                 wideCameraInstance.prepareSurface()
                 mainCameraInstance.prepareSurface()
+                wideCameraInstance.preparePreviewBuffer()
+                mainCameraInstance.preparePreviewBuffer()
 
                 if (wideImageReader == null || mainImageReader == null) {
                     setupImageReaders()
