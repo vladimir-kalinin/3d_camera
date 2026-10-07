@@ -20,11 +20,11 @@ class SbsVideoRecorder(private val context: Context, private val saver: MediaSav
 
     /** Готовит и запускает запись. Возвращает поверхность, в которую нужно рисовать кадры. */
     fun start(size: Size, frameRate: Int, withAudio: Boolean): Surface {
-        val target = saver.createPendingVideo() ?: error("Не удалось создать файл в галерее")
+        val target = saver.createPendingVideo() ?: error("couldn't create a file in the gallery")
         uri = target
 
         try {
-            val descriptor = saver.openForWrite(target) ?: error("Не удалось открыть файл для записи")
+            val descriptor = saver.openForWrite(target) ?: error("couldn't open the file for writing")
             fd = descriptor
             val mr = MediaRecorder(context)
             recorder = mr

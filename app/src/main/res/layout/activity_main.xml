@@ -5,20 +5,41 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
-    <!-- Верхняя строка: технические параметры потока -->
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="0dp"
+    <!-- Верхняя карточка: технические параметры потока, подписи слева, значения справа -->
+    <LinearLayout
+        android:id="@+id/statusPanel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
         android:layout_marginTop="16dp"
-        android:fontFamily="sans-serif-medium"
-        android:gravity="center"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp"
+        android:background="@drawable/bg_card"
+        android:backgroundTint="?attr/colorSurfaceContainerHigh"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/statusLabels"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="3dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/statusValues"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:fontFamily="sans-serif-medium"
+            android:fontFeatureSettings="tnum"
+            android:lineSpacingExtra="3dp"
+            android:textColor="?attr/colorOnSurface"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextureView
         android:id="@+id/preview"

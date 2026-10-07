@@ -57,7 +57,8 @@ class MainActivity : AppCompatActivity() {
     private var stillsEnabled = false
     private var isRecording = false
     private var recordingStartedAt = 0L
-    private var streamInfo = ""
+    /** Строки о размерах потоков для карточки статуса: подпись → значение. */
+    private var streamRows = emptyList<Pair<String, String>>()
     private var permissionAsked = false
     private var cameraStalled = false
     /** Последний снимок или видео — открывается по нажатию на миниатюру. */
@@ -96,7 +97,7 @@ class MainActivity : AppCompatActivity() {
             null
         }
         if (rig == null) {
-            binding.statusText.text = "Не найдена пара задних камер, работающих одновременно"
+            showStatus(listOf("Error" to "no pair of rear cameras\nthat can run concurrently"))
             binding.shutterButton.isEnabled = false
         }
 
@@ -167,6 +168,13 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Камера и рендерер ----------
 
+    /** Показывает технические параметры столбиком: подписи слева, значения справа. */
+    private fun showStatus(rows: List<Pair<String, String>>) {
+        binding.statusLabels.text = rows.joinToString("\n") { it.first }
+        binding.statusValues.text = rows.joinToString("\n") { it.second }
+        binding.statusPanel.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+    }
+
     private fun startCamera() {
         val rig = rig ?: return
         if (camera != null) return
@@ -174,10 +182,11 @@ class MainActivity : AppCompatActivity() {
         val renderer = StereoRenderer(rig, object : StereoRenderer.Listener {
             override fun onStats(stats: StereoRenderer.Stats) {
                 runOnUiThread {
-                    binding.statusText.text = String.format(
-                        Locale.US, "%s · %.0f fps · рассинхрон %.1f мс · без пары %d",
-                        streamInfo, stats.fps, stats.maxPairSkewMs, stats.droppedFrames
-                    )
+                    showStatus(streamRows + listOf(
+                        "Frame rate" to String.format(Locale.US, "%.0f fps", stats.fps),
+                        "Pair skew" to String.format(Locale.US, "%.1f ms", stats.maxPairSkewMs),
+                        "Unpaired" to stats.droppedFrames.toString(),
+                    ))
                     cameraStalled = stats.cameraStalled
                     updateWarning()
                 }
@@ -199,12 +208,12 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     this@MainActivity.stillsEnabled = stillsEnabled
                     val main = rig.main.jpegSize
-                    streamInfo = if (stillsEnabled && main != null) {
-                        "фото ${main.height * 2}×${main.width}"
+                    streamRows = if (stillsEnabled && main != null) {
+                        listOf("Photo" to "${main.height * 2}×${main.width}")
                     } else {
-                        "SBS ${out.width}×${out.height} (ш/у ${wideSize.width}×${wideSize.height})"
-                    }
-                    binding.statusText.text = streamInfo
+                        listOf("SBS" to "${out.width}×${out.height}")
+                    } + ("Wide stream" to "${wideSize.width}×${wideSize.height}")
+                    showStatus(streamRows)
                     (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio =
                         "${out.width}:${out.height}"
                     binding.preview.requestLayout()
@@ -302,9 +311,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun updateWarning() {
         val text = when {
-            cameraStalled -> "Одна из камер перестала отдавать кадры. Обычно это перегрев — дайте телефону остыть"
-            thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> "Телефон перегрелся: Android снижает частоту кадров камер"
-            thermalStatus >= PowerManager.THERMAL_STATUS_LIGHT -> "Телефон нагревается — возможны пропуски кадров"
+            cameraStalled -> "One of the cameras stopped sending frames. This is usually overheating — let the phone cool down"
+            thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> "Phone is overheating: Android is lowering the camera frame rate"
+            thermalStatus >= PowerManager.THERMAL_STATUS_LIGHT -> "Phone is getting warm — frames may be dropped"
             else -> null
         }
         binding.warningText.text = text
@@ -355,7 +364,7 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) showLastMedia(uri)
         runOnUiThread {
             binding.shutterButton.isEnabled = true
-            if (uri == null) Toast.makeText(this, "Не удалось сохранить фото", Toast.LENGTH_SHORT).show()
+            if (uri == null) Toast.makeText(this, "Couldn't save the photo", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -385,7 +394,7 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "Нет приложения для просмотра", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No app to open this file", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -417,7 +426,7 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Не удалось начать запись", e)
                 runOnUiThread {
                     binding.shutterButton.isEnabled = true
-                    Toast.makeText(this, "Не удалось начать запись: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Couldn't start recording: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -435,7 +444,7 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) showLastMedia(uri)
             runOnUiThread {
                 binding.shutterButton.isEnabled = true
-                if (uri == null) Toast.makeText(this, "Видео не записалось", Toast.LENGTH_SHORT).show()
+                if (uri == null) Toast.makeText(this, "Video wasn't saved", Toast.LENGTH_SHORT).show()
             }
         }
         if (wait) task.get()
@@ -488,7 +497,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateCalibrationLabels() {
         val total = (rig?.wideCropFactor ?: 1f) * calibration.scale
-        binding.scaleValue.text = String.format(Locale.US, "%.3f× (итого %.3f×)", calibration.scale, total)
+        binding.scaleValue.text = String.format(Locale.US, "%.3f× (total %.3f×)", calibration.scale, total)
         binding.verticalValue.text = String.format(Locale.US, "%+.1f%%", calibration.verticalShift * 100)
     }
 
@@ -548,17 +557,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAbout() {
         val rig = rig ?: return
-        val left = if (rig.wideIsLeft != calibration.swapEyes) "широкоугольная" else "основная"
-        val message = """
-            Логическая камера: ${rig.logicalId}
-            Широкоугольная: id ${rig.wide.id}, ${rig.wide.focalLengthMm} мм
-            Основная: id ${rig.main.id}, ${rig.main.focalLengthMm} мм
-            Кроп широкоугольной: ${String.format(Locale.US, "%.3f", rig.wideCropFactor)}×
-            База: ${rig.baselineMeters?.let { String.format(Locale.US, "%.1f мм", it * 1000) } ?: "неизвестна"}
-            Левый глаз: $left
-            $streamInfo
-            Файлы: Галерея → ${MediaSaver.ALBUM}
-        """.trimIndent()
+        val left = if (rig.wideIsLeft != calibration.swapEyes) "wide" else "main"
+        val lines = listOf(
+            "Logical camera: ${rig.logicalId}",
+            "Wide: id ${rig.wide.id}, ${rig.wide.focalLengthMm} mm",
+            "Main: id ${rig.main.id}, ${rig.main.focalLengthMm} mm",
+            "Wide crop: ${String.format(Locale.US, "%.3f", rig.wideCropFactor)}×",
+            "Baseline: ${rig.baselineMeters?.let { String.format(Locale.US, "%.1f mm", it * 1000) } ?: "unknown"}",
+            "Left eye: $left",
+        ) + streamRows.map { (label, value) -> "$label: $value" } +
+            "Files: Gallery → ${MediaSaver.ALBUM}"
+        val message = lines.joinToString("\n")
         MaterialAlertDialogBuilder(this).setTitle(R.string.about).setMessage(message).setPositiveButton("OK", null).show()
     }
 
@@ -569,12 +578,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPermissionDeniedDialog() {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Нужен доступ к камере")
-            .setMessage("Без разрешения на камеру приложение не может работать. Микрофон нужен только для звука в видео.")
-            .setPositiveButton("Открыть настройки") { _, _ ->
+            .setTitle("Camera access required")
+            .setMessage("The app can't work without camera permission. The microphone is only used for audio in videos.")
+            .setPositiveButton("Open settings") { _, _ ->
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             }
-            .setNegativeButton("Закрыть") { _, _ -> finish() }
+            .setNegativeButton("Close") { _, _ -> finish() }
             .setCancelable(false)
             .show()
     }

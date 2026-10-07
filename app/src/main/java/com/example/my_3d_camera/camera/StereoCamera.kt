@@ -86,12 +86,12 @@ class StereoCamera(
                         Log.e(TAG, "Ошибка камеры: $error")
                         camera.close()
                         device = null
-                        listener.onError("Ошибка камеры ($error)")
+                        listener.onError("Camera error ($error)")
                     }
                 })
             } catch (e: Exception) {
                 Log.e(TAG, "Не удалось открыть камеру", e)
-                listener.onError("Не удалось открыть камеру: ${e.message}")
+                listener.onError("Couldn't open the camera: ${e.message}")
             }
         }
     }
@@ -116,7 +116,7 @@ class StereoCamera(
     private fun startSession(camera: CameraDevice, plans: List<SessionPlan>) {
         val plan = plans.firstOrNull { isSupported(camera, it) }
         if (plan == null) {
-            listener.onError("Камера не поддерживает одновременную работу двух потоков")
+            listener.onError("The camera doesn't support two concurrent streams")
             return
         }
         Log.i(TAG, "Потоки: wide=${plan.wideSize}, main=${plan.mainSize}, " +
@@ -156,7 +156,7 @@ class StereoCamera(
                         listener.onStarted(plan.wideSize, plan.mainSize, plan.withStills)
                     } catch (e: Exception) {
                         Log.e(TAG, "Не удалось запустить поток кадров", e)
-                        listener.onError("Не удалось запустить камеру: ${e.message}")
+                        listener.onError("Couldn't start the camera: ${e.message}")
                     }
                 }
 
