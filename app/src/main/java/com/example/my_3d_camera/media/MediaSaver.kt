@@ -54,6 +54,15 @@ class MediaSaver(context: Context) {
     fun savePhoto(pixels: ByteBuffer, width: Int, height: Int): Uri? {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         bitmap.copyPixelsFromBuffer(pixels)
+        return try {
+            savePhoto(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /** Сохраняет SBS-фото как JPEG в галерею. Вызывать не на UI-потоке. */
+    fun savePhoto(bitmap: Bitmap): Uri? {
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, newFileName("jpg"))
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -62,16 +71,14 @@ class MediaSaver(context: Context) {
         }
         val uri = resolver.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
             ?: return null
-        try {
+        return try {
             resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
             publish(uri)
-            return uri
+            uri
         } catch (e: Exception) {
             Log.e(TAG, "Не удалось сохранить фото", e)
             delete(uri)
-            return null
-        } finally {
-            bitmap.recycle()
+            null
         }
     }
 

@@ -32,6 +32,7 @@ import com.example.my_3d_camera.databinding.ActivityMainBinding
 import com.example.my_3d_camera.gl.StereoRenderer
 import com.example.my_3d_camera.media.MediaSaver
 import com.example.my_3d_camera.media.SbsVideoRecorder
+import com.example.my_3d_camera.media.StillComposer
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -51,6 +52,8 @@ class MainActivity : AppCompatActivity() {
 
     private var calibration = StereoRenderer.Calibration()
     private var mode = CaptureMode.VIDEO
+    /** Камера настроена на полноразмерные JPEG (режим фото). */
+    private var stillsEnabled = false
     private var isRecording = false
     private var recordingStartedAt = 0L
     private var streamInfo = ""
@@ -162,10 +165,16 @@ class MainActivity : AppCompatActivity() {
                 return wideSurface to mainSurface
             }
 
-            override fun onStarted(wideSize: Size, mainSize: Size) {
+            override fun onStarted(wideSize: Size, mainSize: Size, stillsEnabled: Boolean) {
                 val out = renderer.outputSize
                 runOnUiThread {
-                    streamInfo = "SBS ${out.width}×${out.height} (ш/у ${wideSize.width}×${wideSize.height})"
+                    this@MainActivity.stillsEnabled = stillsEnabled
+                    val main = rig.main.jpegSize
+                    streamInfo = if (stillsEnabled && main != null) {
+                        "фото ${main.height * 2}×${main.width}"
+                    } else {
+                        "SBS ${out.width}×${out.height} (ш/у ${wideSize.width}×${wideSize.height})"
+                    }
                     binding.statusText.text = streamInfo
                     (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio =
                         "${out.width}:${out.height}"
@@ -232,6 +241,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopCamera() {
+        stillsEnabled = false
         // Сначала камера перестаёт слать кадры, потом освобождаем поверхности рендерера
         camera?.close()
         camera = null
@@ -277,19 +287,48 @@ class MainActivity : AppCompatActivity() {
 
     private fun takePhoto() {
         val renderer = renderer ?: return
+        val camera = camera
         binding.shutterButton.isEnabled = false
         binding.preview.animate().alpha(0.3f).setDuration(60).withEndAction {
             binding.preview.animate().alpha(1f).setDuration(120)
         }
-        renderer.capturePhoto { pixels, width, height ->
-            io.execute {
-                val uri = saver.savePhoto(pixels, width, height)
-                runOnUiThread {
-                    binding.shutterButton.isEnabled = true
-                    val text = if (uri != null) "Фото сохранено (${width}×${height})" else "Не удалось сохранить фото"
-                    Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+        if (stillsEnabled && camera != null) {
+            // Полноразмерный снимок с обеих камер, SBS собирается на CPU
+            val rig = rig ?: return
+            val calibration = calibration
+            camera.captureStill { still ->
+                if (still == null) {
+                    onPhotoSaved(null, "")
+                    return@captureStill
+                }
+                io.execute {
+                    val uri = try {
+                        val bitmap = StillComposer.compose(rig, calibration, still.wideJpeg, still.mainJpeg)
+                        val size = "${bitmap.width}×${bitmap.height}"
+                        saver.savePhoto(bitmap).also { bitmap.recycle() }?.let { it to size }
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Не удалось собрать фото", e)
+                        null
+                    }
+                    onPhotoSaved(uri?.first, uri?.second ?: "")
                 }
             }
+        } else {
+            // Фото из кадра превью
+            renderer.capturePhoto { pixels, width, height ->
+                io.execute {
+                    val uri = saver.savePhoto(pixels, width, height)
+                    onPhotoSaved(uri, "${width}×${height}")
+                }
+            }
+        }
+    }
+
+    private fun onPhotoSaved(uri: Uri?, size: String) {
+        runOnUiThread {
+            binding.shutterButton.isEnabled = true
+            val text = if (uri != null) "Фото сохранено ($size)" else "Не удалось сохранить фото"
+            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
         }
     }
 

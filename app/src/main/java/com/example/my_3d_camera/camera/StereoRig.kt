@@ -1,5 +1,6 @@
 package com.example.my_3d_camera.camera
 
+import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
@@ -40,6 +41,8 @@ data class StereoRig(
         val principalV: Float,
         val sensorOrientation: Int,
         val outputSizes: List<Size>,
+        /** Наибольший JPEG 4:3 — для полноразмерного фото. */
+        val jpegSize: Size?,
     )
 
     /** Во сколько раз широкоугольный кадр нужно увеличить, чтобы совпасть с основным. */
@@ -143,6 +146,8 @@ data class StereoRig(
             val orientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
             val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
+            val jpegSize = map.getOutputSizes(ImageFormat.JPEG)?.filter { isFourByThree(it) }
+                ?.maxByOrNull { it.width.toLong() * it.height }
 
             // Портретная ширина кадра соответствует высоте сенсора (сенсор повёрнут на 90°)
             val rotated = orientation % 180 != 0
@@ -174,7 +179,7 @@ data class StereoRig(
 
             // Переводим оптический центр из координат сенсора в портретные координаты кадра
             val (pu, pv) = sensorToPortrait(cx / sensorW, cy / sensorH, orientation)
-            return PhysicalCamera(id, focal, normFocal, physicalNormFocal, pu, pv, orientation, sizes)
+            return PhysicalCamera(id, focal, normFocal, physicalNormFocal, pu, pv, orientation, sizes, jpegSize)
         }
 
         /** Нормированные координаты сенсора (y вниз) → портретные координаты (y вниз). */
