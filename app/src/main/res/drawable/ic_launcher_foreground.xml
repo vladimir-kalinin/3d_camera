@@ -1,117 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Стереокамера в духе Kodak Stereo: два объектива, левый с красным отблеском, правый с голубым -->
+<!-- Блок камер Pixel 9: левый объектив с красным отблеском, правый с голубым -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.84" android:scaleY="0.84">
-    <!-- Тень под камерой -->
-    <path android:fillColor="#26000000" android:pathData="M23,75a31,2.6 0,1 0,62,0a31,2.6 0,1 0,-62,0Z" />
-    <!-- Головка перемотки -->
-    <path android:pathData="M25.7,36H37.3A1.2,1.2 0,0 1,38.5,37.2V41.8A1.2,1.2 0,0 1,37.3,43H25.7A1.2,1.2 0,0 1,24.5,41.8V37.2A1.2,1.2 0,0 1,25.7,36Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="24.5" android:startY="0" android:endX="38.5" android:endY="0"><item android:offset="0" android:color="#FF9C9C96"/><item android:offset="0.35" android:color="#FFF2F2EE"/><item android:offset="1" android:color="#FF8A8A84"/></gradient></aapt:attr>
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
+    <!-- Графитовая рамка блока камер -->
+    <path android:pathData="M-20,37H71A17,17 0,0 1,71 71H-20Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="37" android:endX="0" android:endY="71"><item android:offset="0" android:color="#FF9A9EA3"/><item android:offset="0.08" android:color="#FF6E7277"/><item android:offset="0.5" android:color="#FF55595E"/><item android:offset="0.92" android:color="#FF7A7E83"/><item android:offset="1" android:color="#FF3E4145"/></gradient></aapt:attr>
     </path>
-    <path android:fillColor="#55000000" android:pathData="M24.97,37.2h0.45v5.2h-0.45ZM26.37,37.2h0.45v5.2h-0.45ZM27.77,37.2h0.45v5.2h-0.45ZM29.17,37.2h0.45v5.2h-0.45ZM30.57,37.2h0.45v5.2h-0.45ZM31.97,37.2h0.45v5.2h-0.45ZM33.37,37.2h0.45v5.2h-0.45ZM34.77,37.2h0.45v5.2h-0.45ZM36.17,37.2h0.45v5.2h-0.45ZM37.57,37.2h0.45v5.2h-0.45Z" />
-    <path android:pathData="M24.5,36a7,1.8 0,1 0,14,0a7,1.8 0,1 0,-14,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="29.5" android:centerY="35.5" android:gradientRadius="7"><item android:offset="0" android:color="#FFFFFFFF"/><item android:offset="1" android:color="#FFC4C4BE"/></gradient></aapt:attr>
+    <!-- Чёрное стекло -->
+    <path android:pathData="M37,39.3H71A14.7,14.7 0,0 1,85.7,54V54A14.7,14.7 0,0 1,71,68.7H37A14.7,14.7 0,0 1,22.3,54V54A14.7,14.7 0,0 1,37,39.3Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="39.3" android:endX="0" android:endY="68.7"><item android:offset="0" android:color="#FF202326"/><item android:offset="1" android:color="#FF050607"/></gradient></aapt:attr>
     </path>
-    <path android:fillColor="#33000000" android:pathData="M29.3,36a2.2,0.6 0,1 0,4.4,0a2.2,0.6 0,1 0,-4.4,0Z" />
-    <!-- Головка перемотки -->
-    <path android:pathData="M70.7,36H82.3A1.2,1.2 0,0 1,83.5,37.2V41.8A1.2,1.2 0,0 1,82.3,43H70.7A1.2,1.2 0,0 1,69.5,41.8V37.2A1.2,1.2 0,0 1,70.7,36Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="69.5" android:startY="0" android:endX="83.5" android:endY="0"><item android:offset="0" android:color="#FF9C9C96"/><item android:offset="0.35" android:color="#FFF2F2EE"/><item android:offset="1" android:color="#FF8A8A84"/></gradient></aapt:attr>
+    <!-- Блик на стекле -->
+    <path android:fillColor="#0FFFFFFF" android:pathData="M27,44a15,2.6 0,1 0,30,0a15,2.6 0,1 0,-30,0Z" />
+    <!-- Вспышка -->
+    <path android:fillColor="#FF3A3A38" android:pathData="M26.3,52.6H28.1A0.7,0.7 0,0 1,28.8,53.3V55.1A0.7,0.7 0,0 1,28.1,55.8H26.3A0.7,0.7 0,0 1,25.6,55.1V53.3A0.7,0.7 0,0 1,26.3,52.6Z" />
+    <path android:fillColor="#FFD6CFB4" android:pathData="M26.7,53.3H27.7A0.4,0.4 0,0 1,28.1,53.7V54.7A0.4,0.4 0,0 1,27.7,55.1H26.7A0.4,0.4 0,0 1,26.3,54.7V53.7A0.4,0.4 0,0 1,26.7,53.3Z" />
+    <!-- Микрофон -->
+    <path android:fillColor="#FF8E9094" android:pathData="M59.95,45.3a0.75,0.75 0,1 0,1.5,0a0.75,0.75 0,1 0,-1.5,0Z" />
+    <!-- Лазерный автофокус -->
+    <path android:fillColor="#FFB07CF0" android:pathData="M62.05,64.6a0.75,0.75 0,1 0,1.5,0a0.75,0.75 0,1 0,-1.5,0Z" />
+    <path android:fillColor="#30B07CF0" android:pathData="M61.2,64.6a1.6,1.6 0,1 0,3.2,0a1.6,1.6 0,1 0,-3.2,0Z" />
+    <!-- Основная камера -->
+    <path android:fillColor="#FF0B0C0E" android:pathData="M37.2,54.5a8.2,8.2 0,1 0,16.4,0a8.2,8.2 0,1 0,-16.4,0Z" android:strokeColor="#FF33363B" android:strokeWidth="0.6" />
+    <path android:fillColor="#FF181A1D" android:pathData="M39,54.5a6.4,6.4 0,1 0,12.8,0a6.4,6.4 0,1 0,-12.8,0Z" />
+    <path android:pathData="M41,54.5a4.4,4.4 0,1 0,8.8,0a4.4,4.4 0,1 0,-8.8,0Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="45.4" android:centerY="54.5" android:gradientRadius="4.4"><item android:offset="0" android:color="#FF2E3640"/><item android:offset="0.75" android:color="#FF14181C"/><item android:offset="1" android:color="#FF3A3F45"/></gradient></aapt:attr>
     </path>
-    <path android:fillColor="#55000000" android:pathData="M69.98,37.2h0.45v5.2h-0.45ZM71.38,37.2h0.45v5.2h-0.45ZM72.78,37.2h0.45v5.2h-0.45ZM74.18,37.2h0.45v5.2h-0.45ZM75.58,37.2h0.45v5.2h-0.45ZM76.98,37.2h0.45v5.2h-0.45ZM78.38,37.2h0.45v5.2h-0.45ZM79.78,37.2h0.45v5.2h-0.45ZM81.18,37.2h0.45v5.2h-0.45ZM82.58,37.2h0.45v5.2h-0.45Z" />
-    <path android:pathData="M69.5,36a7,1.8 0,1 0,14,0a7,1.8 0,1 0,-14,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="74.5" android:centerY="35.5" android:gradientRadius="7"><item android:offset="0" android:color="#FFFFFFFF"/><item android:offset="1" android:color="#FFC4C4BE"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#33000000" android:pathData="M74.3,36a2.2,0.6 0,1 0,4.4,0a2.2,0.6 0,1 0,-4.4,0Z" />
-    <!-- Верхняя хромированная планка -->
-    <path android:pathData="M27.5,40.5H80.5A1.5,1.5 0,0 1,82,42V44A1.5,1.5 0,0 1,80.5,45.5H27.5A1.5,1.5 0,0 1,26,44V42A1.5,1.5 0,0 1,27.5,40.5Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="40.5" android:endX="0" android:endY="45.5"><item android:offset="0" android:color="#FFF5F5F2"/><item android:offset="0.45" android:color="#FFC9C9C4"/><item android:offset="0.55" android:color="#FFA9A9A3"/><item android:offset="1" android:color="#FFE4E4DF"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#FF6E6E68" android:pathData="M41.7,43a1.3,1.3 0,1 0,2.6,0a1.3,1.3 0,1 0,-2.6,0ZM63.7,43a1.3,1.3 0,1 0,2.6,0a1.3,1.3 0,1 0,-2.6,0Z" />
-    <!-- Блок спуска -->
-    <path android:pathData="M49.5,38.5H58.5A1.5,1.5 0,0 1,60,40V44A1.5,1.5 0,0 1,58.5,45.5H49.5A1.5,1.5 0,0 1,48,44V40A1.5,1.5 0,0 1,49.5,38.5Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="38.5" android:endX="0" android:endY="45.5"><item android:offset="0" android:color="#FFF5F5F2"/><item android:offset="0.45" android:color="#FFC9C9C4"/><item android:offset="0.55" android:color="#FFA9A9A3"/><item android:offset="1" android:color="#FFE4E4DF"/></gradient></aapt:attr>
-    </path>
-    <!-- Красная кнопка -->
-    <path android:fillColor="#FFD93025" android:pathData="M51.4,41.6a2.6,1.3 0,1 0,5.2,0a2.6,1.3 0,1 0,-5.2,0Z" />
-    <path android:fillColor="#80FFFFFF" android:pathData="M52.3,41.2a1,0.4 0,1 0,2,0a1,0.4 0,1 0,-2,0Z" />
-    <!-- Корпус -->
-    <path android:pathData="M27,44H81A5,5 0,0 1,86,49V69A5,5 0,0 1,81,74H27A5,5 0,0 1,22,69V49A5,5 0,0 1,27,44Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="44" android:endX="0" android:endY="74"><item android:offset="0" android:color="#FF7A4A36"/><item android:offset="1" android:color="#FF4A2A1F"/></gradient></aapt:attr>
-    </path>
-    <!-- Вставка под кожу -->
-    <path android:pathData="M26,47H29A2,2 0,0 1,31,49V69A2,2 0,0 1,29,71H26A2,2 0,0 1,24,69V49A2,2 0,0 1,26,47Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="47" android:endX="0" android:endY="71"><item android:offset="0" android:color="#FFB2A893"/><item android:offset="1" android:color="#FF8C836F"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#26000000" android:pathData="M24.85,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,50.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,50.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,53.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,53.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,56.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,56.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,59.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,59.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,62.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,62.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,66.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,66.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM24.85,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM27.15,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM29.45,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM26,69.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM28.3,69.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0Z" />
-    <!-- Вставка под кожу -->
-    <path android:pathData="M79,47H82A2,2 0,0 1,84,49V69A2,2 0,0 1,82,71H79A2,2 0,0 1,77,69V49A2,2 0,0 1,79,47Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="47" android:endX="0" android:endY="71"><item android:offset="0" android:color="#FFB2A893"/><item android:offset="1" android:color="#FF8C836F"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#26000000" android:pathData="M77.85,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,48.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,50.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,50.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,51.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,53.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,53.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,54.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,56.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,56.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,58.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,59.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,59.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,61.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,62.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,62.9a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,64.5a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,66.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,66.1a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM77.85,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM80.15,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM82.45,67.7a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM79,69.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0ZM81.3,69.3a0.35,0.35 0,1 0,0.7,0a0.35,0.35 0,1 0,-0.7,0Z" />
-    <!-- Табличка с названием -->
-    <path android:fillColor="#FF3A2018" android:pathData="M44.8,46H63.2A0.8,0.8 0,0 1,64,46.8V48.7A0.8,0.8 0,0 1,63.2,49.5H44.8A0.8,0.8 0,0 1,44,48.7V46.8A0.8,0.8 0,0 1,44.8,46Z" />
-    <path android:fillColor="#FFE8D9B0" android:pathData="M46.3,47.3H50.7A0.3,0.3 0,0 1,51,47.6V47.9A0.3,0.3 0,0 1,50.7,48.2H46.3A0.3,0.3 0,0 1,46,47.9V47.6A0.3,0.3 0,0 1,46.3,47.3ZM52.3,47.1H61.7A0.3,0.3 0,0 1,62,47.4V48.1A0.3,0.3 0,0 1,61.7,48.4H52.3A0.3,0.3 0,0 1,52,48.1V47.4A0.3,0.3 0,0 1,52.3,47.1Z" />
-    <!-- Светлая панель объективов -->
-    <path android:pathData="M37.5,50H70.5A9,9 0,0 1,79.5,59V62A9,9 0,0 1,70.5,71H37.5A9,9 0,0 1,28.5,62V59A9,9 0,0 1,37.5,50Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="50" android:endX="0" android:endY="71"><item android:offset="0" android:color="#FFEDEBE6"/><item android:offset="1" android:color="#FFB9B6AE"/></gradient></aapt:attr>
-    </path>
-    <!-- Видоискатель -->
-    <path android:pathData="M50.7,55H57.3A1.2,1.2 0,0 1,58.5,56.2V63.8A1.2,1.2 0,0 1,57.3,65H50.7A1.2,1.2 0,0 1,49.5,63.8V56.2A1.2,1.2 0,0 1,50.7,55Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="55" android:endX="0" android:endY="65"><item android:offset="0" android:color="#FFF5F5F2"/><item android:offset="0.45" android:color="#FFC9C9C4"/><item android:offset="0.55" android:color="#FFA9A9A3"/><item android:offset="1" android:color="#FFE4E4DF"/></gradient></aapt:attr>
-    </path>
-    <path android:pathData="M51.6,56.5H56.4A0.6,0.6 0,0 1,57,57.1V62.9A0.6,0.6 0,0 1,56.4,63.5H51.6A0.6,0.6 0,0 1,51,62.9V57.1A0.6,0.6 0,0 1,51.6,56.5Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="51" android:startY="56.5" android:endX="57" android:endY="63.5"><item android:offset="0" android:color="#FF4A5A66"/><item android:offset="1" android:color="#FF101418"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#FF6BDB6B" android:pathData="M52.9,61H55.1A0.4,0.4 0,0 1,55.5,61.4V61.8A0.4,0.4 0,0 1,55.1,62.2H52.9A0.4,0.4 0,0 1,52.5,61.8V61.4A0.4,0.4 0,0 1,52.9,61Z" />
-    <path android:fillColor="#66FFFFFF" android:pathData="M51.8,57.1H53.4A0.2,0.2 0,0 1,53.6,57.3V57.4A0.2,0.2 0,0 1,53.4,57.6H51.8A0.2,0.2 0,0 1,51.6,57.4V57.3A0.2,0.2 0,0 1,51.8,57.1Z" />
-    <!-- Рифлёная оправа объектива -->
-    <path android:pathData="M30,60a10,10 0,1 0,20,0a10,10 0,1 0,-20,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="30" android:startY="50" android:endX="50" android:endY="70"><item android:offset="0" android:color="#FFFFFFFF"/><item android:offset="0.5" android:color="#FFC2C2BC"/><item android:offset="1" android:color="#FF7C7C76"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#40000000" android:pathData="M48.20,59.77L50.00,59.73L50.00,60.27L48.20,60.23ZM48.13,61.06L49.92,61.29L49.83,61.84L48.06,61.50ZM47.87,62.32L49.59,62.83L49.42,63.35L47.73,62.75ZM47.41,63.52L49.03,64.29L48.78,64.78L47.20,63.92ZM46.76,64.64L48.25,65.65L47.93,66.10L46.50,65.00ZM45.96,65.64L47.26,66.87L46.87,67.26L45.64,65.96ZM45.00,66.50L46.10,67.93L45.65,68.25L44.64,66.76ZM43.92,67.20L44.78,68.78L44.29,69.03L43.52,67.41ZM42.75,67.73L43.35,69.42L42.83,69.59L42.32,67.87ZM41.50,68.06L41.84,69.83L41.29,69.92L41.06,68.13ZM40.23,68.20L40.27,70.00L39.73,70.00L39.77,68.20ZM38.94,68.13L38.71,69.92L38.16,69.83L38.50,68.06ZM37.68,67.87L37.17,69.59L36.65,69.42L37.25,67.73ZM36.48,67.41L35.71,69.03L35.22,68.78L36.08,67.20ZM35.36,66.76L34.35,68.25L33.90,67.93L35.00,66.50ZM34.36,65.96L33.13,67.26L32.74,66.87L34.04,65.64ZM33.50,65.00L32.07,66.10L31.75,65.65L33.24,64.64ZM32.80,63.92L31.22,64.78L30.97,64.29L32.59,63.52ZM32.27,62.75L30.58,63.35L30.41,62.83L32.13,62.32ZM31.94,61.50L30.17,61.84L30.08,61.29L31.87,61.06ZM31.80,60.23L30.00,60.27L30.00,59.73L31.80,59.77ZM31.87,58.94L30.08,58.71L30.17,58.16L31.94,58.50ZM32.13,57.68L30.41,57.17L30.58,56.65L32.27,57.25ZM32.59,56.48L30.97,55.71L31.22,55.22L32.80,56.08ZM33.24,55.36L31.75,54.35L32.07,53.90L33.50,55.00ZM34.04,54.36L32.74,53.13L33.13,52.74L34.36,54.04ZM35.00,53.50L33.90,52.07L34.35,51.75L35.36,53.24ZM36.08,52.80L35.22,51.22L35.71,50.97L36.48,52.59ZM37.25,52.27L36.65,50.58L37.17,50.41L37.68,52.13ZM38.50,51.94L38.16,50.17L38.71,50.08L38.94,51.87ZM39.77,51.80L39.73,50.00L40.27,50.00L40.23,51.80ZM41.06,51.87L41.29,50.08L41.84,50.17L41.50,51.94ZM42.32,52.13L42.83,50.41L43.35,50.58L42.75,52.27ZM43.52,52.59L44.29,50.97L44.78,51.22L43.92,52.80ZM44.64,53.24L45.65,51.75L46.10,52.07L45.00,53.50ZM45.64,54.04L46.87,52.74L47.26,53.13L45.96,54.36ZM46.50,55.00L47.93,53.90L48.25,54.35L46.76,55.36ZM47.20,56.08L48.78,55.22L49.03,55.71L47.41,56.48ZM47.73,57.25L49.42,56.65L49.59,57.17L47.87,57.68ZM48.06,58.50L49.83,58.16L49.92,58.71L48.13,58.94Z" />
-    <path android:pathData="M32,60a8,8 0,1 0,16,0a8,8 0,1 0,-16,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="48" android:startY="68" android:endX="32" android:endY="52"><item android:offset="0" android:color="#FFF4F4F0"/><item android:offset="1" android:color="#FF9A9A94"/></gradient></aapt:attr>
-    </path>
-    <!-- Тубус -->
-    <path android:fillColor="#FF1B1B1B" android:pathData="M33.4,60a6.6,6.6 0,1 0,13.2,0a6.6,6.6 0,1 0,-13.2,0Z" />
-    <!-- Стекло -->
-    <path android:pathData="M34.6,60a5.4,5.4 0,1 0,10.8,0a5.4,5.4 0,1 0,-10.8,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="40" android:centerY="60" android:gradientRadius="5.4"><item android:offset="0" android:color="#FF2B3A4A"/><item android:offset="0.7" android:color="#FF0E141A"/><item android:offset="1" android:color="#FF050708"/></gradient></aapt:attr>
+    <path android:pathData="M43,54.5a2.4,2.4 0,1 0,4.8,0a2.4,2.4 0,1 0,-4.8,0Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="44.8" android:centerY="53.9" android:gradientRadius="2.4"><item android:offset="0" android:color="#FF3B4C5E"/><item android:offset="1" android:color="#FF07090B"/></gradient></aapt:attr>
     </path>
     <!-- Цветной отблеск (анаглиф) -->
-    <path android:fillColor="#FFEA4335" android:pathData="M35.4,60.5A4.6,4.6 0,0 0,40.5,64.6A3.6,3.6 0,0 1,35.4,60.5Z" />
-    <path android:fillColor="#CCFFFFFF" android:pathData="M36.5,58a1.6,1 0,1 0,3.2,0a1.6,1 0,1 0,-3.2,0Z" />
-    <path android:fillColor="#99FFFFFF" android:pathData="M41.6,61.4a0.5,0.5 0,1 0,1,0a0.5,0.5 0,1 0,-1,0Z" />
-    <!-- Рифлёная оправа объектива -->
-    <path android:pathData="M58,60a10,10 0,1 0,20,0a10,10 0,1 0,-20,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="58" android:startY="50" android:endX="78" android:endY="70"><item android:offset="0" android:color="#FFFFFFFF"/><item android:offset="0.5" android:color="#FFC2C2BC"/><item android:offset="1" android:color="#FF7C7C76"/></gradient></aapt:attr>
-    </path>
-    <path android:fillColor="#40000000" android:pathData="M76.20,59.77L78.00,59.73L78.00,60.27L76.20,60.23ZM76.13,61.06L77.92,61.29L77.83,61.84L76.06,61.50ZM75.87,62.32L77.59,62.83L77.42,63.35L75.73,62.75ZM75.41,63.52L77.03,64.29L76.78,64.78L75.20,63.92ZM74.76,64.64L76.25,65.65L75.93,66.10L74.50,65.00ZM73.96,65.64L75.26,66.87L74.87,67.26L73.64,65.96ZM73.00,66.50L74.10,67.93L73.65,68.25L72.64,66.76ZM71.92,67.20L72.78,68.78L72.29,69.03L71.52,67.41ZM70.75,67.73L71.35,69.42L70.83,69.59L70.32,67.87ZM69.50,68.06L69.84,69.83L69.29,69.92L69.06,68.13ZM68.23,68.20L68.27,70.00L67.73,70.00L67.77,68.20ZM66.94,68.13L66.71,69.92L66.16,69.83L66.50,68.06ZM65.68,67.87L65.17,69.59L64.65,69.42L65.25,67.73ZM64.48,67.41L63.71,69.03L63.22,68.78L64.08,67.20ZM63.36,66.76L62.35,68.25L61.90,67.93L63.00,66.50ZM62.36,65.96L61.13,67.26L60.74,66.87L62.04,65.64ZM61.50,65.00L60.07,66.10L59.75,65.65L61.24,64.64ZM60.80,63.92L59.22,64.78L58.97,64.29L60.59,63.52ZM60.27,62.75L58.58,63.35L58.41,62.83L60.13,62.32ZM59.94,61.50L58.17,61.84L58.08,61.29L59.87,61.06ZM59.80,60.23L58.00,60.27L58.00,59.73L59.80,59.77ZM59.87,58.94L58.08,58.71L58.17,58.16L59.94,58.50ZM60.13,57.68L58.41,57.17L58.58,56.65L60.27,57.25ZM60.59,56.48L58.97,55.71L59.22,55.22L60.80,56.08ZM61.24,55.36L59.75,54.35L60.07,53.90L61.50,55.00ZM62.04,54.36L60.74,53.13L61.13,52.74L62.36,54.04ZM63.00,53.50L61.90,52.07L62.35,51.75L63.36,53.24ZM64.08,52.80L63.22,51.22L63.71,50.97L64.48,52.59ZM65.25,52.27L64.65,50.58L65.17,50.41L65.68,52.13ZM66.50,51.94L66.16,50.17L66.71,50.08L66.94,51.87ZM67.77,51.80L67.73,50.00L68.27,50.00L68.23,51.80ZM69.06,51.87L69.29,50.08L69.84,50.17L69.50,51.94ZM70.32,52.13L70.83,50.41L71.35,50.58L70.75,52.27ZM71.52,52.59L72.29,50.97L72.78,51.22L71.92,52.80ZM72.64,53.24L73.65,51.75L74.10,52.07L73.00,53.50ZM73.64,54.04L74.87,52.74L75.26,53.13L73.96,54.36ZM74.50,55.00L75.93,53.90L76.25,54.35L74.76,55.36ZM75.20,56.08L76.78,55.22L77.03,55.71L75.41,56.48ZM75.73,57.25L77.42,56.65L77.59,57.17L75.87,57.68ZM76.06,58.50L77.83,58.16L77.92,58.71L76.13,58.94Z" />
-    <path android:pathData="M60,60a8,8 0,1 0,16,0a8,8 0,1 0,-16,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="76" android:startY="68" android:endX="60" android:endY="52"><item android:offset="0" android:color="#FFF4F4F0"/><item android:offset="1" android:color="#FF9A9A94"/></gradient></aapt:attr>
-    </path>
-    <!-- Тубус -->
-    <path android:fillColor="#FF1B1B1B" android:pathData="M61.4,60a6.6,6.6 0,1 0,13.2,0a6.6,6.6 0,1 0,-13.2,0Z" />
-    <!-- Стекло -->
-    <path android:pathData="M62.6,60a5.4,5.4 0,1 0,10.8,0a5.4,5.4 0,1 0,-10.8,0Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="68" android:centerY="60" android:gradientRadius="5.4"><item android:offset="0" android:color="#FF2B3A4A"/><item android:offset="0.7" android:color="#FF0E141A"/><item android:offset="1" android:color="#FF050708"/></gradient></aapt:attr>
+    <path android:fillColor="#FFEA4335" android:pathData="M41.6,54.5A3.8,3.8 0,0 0,45.4,58.3A3,3 0,0 1,41.6,54.5Z" />
+    <path android:fillColor="#CCFFFFFF" android:pathData="M42.8,52.8a1.1,0.7 0,1 0,2.2,0a1.1,0.7 0,1 0,-2.2,0Z" />
+    <!-- Широкоугольная камера -->
+    <path android:fillColor="#FF16181B" android:pathData="M65.9,54.2a5.8,5.8 0,1 0,11.6,0a5.8,5.8 0,1 0,-11.6,0Z" android:strokeColor="#FF33363B" android:strokeWidth="0.6" />
+    <path android:fillColor="#FF0A0B0C" android:pathData="M67.5,54.2a4.2,4.2 0,1 0,8.4,0a4.2,4.2 0,1 0,-8.4,0Z" />
+    <path android:pathData="M70.4,51.8H73A1.1,1.1 0,0 1,74.1,52.9V55.5A1.1,1.1 0,0 1,73,56.6H70.4A1.1,1.1 0,0 1,69.3,55.5V52.9A1.1,1.1 0,0 1,70.4,51.8Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="71.7" android:centerY="54.2" android:gradientRadius="3.2"><item android:offset="0" android:color="#FF35404C"/><item android:offset="1" android:color="#FF0C0F12"/></gradient></aapt:attr>
     </path>
     <!-- Цветной отблеск (анаглиф) -->
-    <path android:fillColor="#FF12B5CB" android:pathData="M63.4,60.5A4.6,4.6 0,0 0,68.5,64.6A3.6,3.6 0,0 1,63.4,60.5Z" />
-    <path android:fillColor="#CCFFFFFF" android:pathData="M64.5,58a1.6,1 0,1 0,3.2,0a1.6,1 0,1 0,-3.2,0Z" />
-    <path android:fillColor="#99FFFFFF" android:pathData="M69.6,61.4a0.5,0.5 0,1 0,1,0a0.5,0.5 0,1 0,-1,0Z" />
-    <!-- Ушко ремня -->
-    <path android:pathData="M22.2,50H23A0.6,0.6 0,0 1,23.6,50.6V54.4A0.6,0.6 0,0 1,23,55H22.2A0.6,0.6 0,0 1,21.6,54.4V50.6A0.6,0.6 0,0 1,22.2,50Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="50" android:endX="0" android:endY="55"><item android:offset="0" android:color="#FFF5F5F2"/><item android:offset="0.45" android:color="#FFC9C9C4"/><item android:offset="0.55" android:color="#FFA9A9A3"/><item android:offset="1" android:color="#FFE4E4DF"/></gradient></aapt:attr>
-    </path>
-    <!-- Ушко ремня -->
-    <path android:pathData="M85,50H85.8A0.6,0.6 0,0 1,86.4,50.6V54.4A0.6,0.6 0,0 1,85.8,55H85A0.6,0.6 0,0 1,84.4,54.4V50.6A0.6,0.6 0,0 1,85,50Z">
-        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="50" android:endX="0" android:endY="55"><item android:offset="0" android:color="#FFF5F5F2"/><item android:offset="0.45" android:color="#FFC9C9C4"/><item android:offset="0.55" android:color="#FFA9A9A3"/><item android:offset="1" android:color="#FFE4E4DF"/></gradient></aapt:attr>
-    </path>
+    <path android:fillColor="#FF12B5CB" android:pathData="M68.3,54.2A3.4,3.4 0,0 0,71.7,57.6A2.7,2.7 0,0 1,68.3,54.2Z" />
+    <path android:fillColor="#CCFFFFFF" android:pathData="M69.6,52.9a0.9,0.55 0,1 0,1.8,0a0.9,0.55 0,1 0,-1.8,0Z" />
     </group>
 </vector>
