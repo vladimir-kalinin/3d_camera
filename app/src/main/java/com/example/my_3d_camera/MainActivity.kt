@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var saver: MediaSaver
     private lateinit var videoRecorder: SbsVideoRecorder
     private val mainHandler = Handler(Looper.getMainLooper())
-    /** Сохранение файлов и управление MediaRecorder — вне UI-потока, строго по очереди. */
+    /** Сохранение файлов и управление записью видео — вне UI-потока, строго по очереди. */
     private val io = Executors.newSingleThreadExecutor()
 
     private var rig: StereoRig? = null
@@ -86,7 +86,7 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         saver = MediaSaver(this)
-        videoRecorder = SbsVideoRecorder(this, saver)
+        videoRecorder = SbsVideoRecorder(saver)
         calibration = loadCalibration()
         mode = loadMode()
 
@@ -438,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         updateRecordingUi()
         binding.shutterButton.isEnabled = false
         val task = io.submit {
-            // Рендерер перестаёт рисовать в поверхность энкодера до остановки MediaRecorder
+            // Рендерер перестаёт рисовать в поверхность энкодера до остановки энкодера
             renderer?.stopRecording()
             val uri = videoRecorder.stop()
             if (uri != null) showLastMedia(uri)
