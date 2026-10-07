@@ -1,3 +1,12 @@
 <resources>
-    <string name="app_name">my_3d_camera</string>
+    <string name="app_name">3D Камера</string>
+    <string name="menu">Меню</string>
+    <string name="record_video">Записать видео</string>
+    <string name="stop_video">Остановить запись</string>
+    <string name="take_photo">Сделать фото</string>
+    <string name="calibration_scale">Масштаб широкоугольной</string>
+    <string name="calibration_vertical">Сдвиг по вертикали</string>
+    <string name="swap_eyes">Поменять глаза местами</string>
+    <string name="reset_calibration">Сбросить подстройку</string>
+    <string name="about">О камерах</string>
 </resources>
