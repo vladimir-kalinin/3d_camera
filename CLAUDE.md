@@ -40,7 +40,7 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
   (uiautomator сам нагружает телефон — для точных замеров лучше временный `Log.d` из `onStats`).
 - Кнопки нажимаются через `adb shell input tap X Y` (координаты брать из uiautomator dump).
 - Скриншот: `adb exec-out screencap -p > shot.png`.
-- Видео/фото лежат в `/sdcard/Movies/3D Camera` и `/sdcard/Pictures/3D Camera`;
+- Видео и фото лежат в `/sdcard/DCIM/3D Camera` (раньше — `Movies/` и `Pictures/`, при запуске переносятся);
   список: `adb shell content query --uri content://media/external/video/media ...`.
   ffprobe на маке нет — частоту кадров MP4 считали python-парсером таблицы `stts`.
 - Характеристики камер: `adb shell dumpsys media.camera`.
@@ -79,8 +79,10 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
   и рисуется в кольцевой буфер (`StereoRenderer.EyeStream`), пары ищутся там по метке времени.
 - С включённой коррекцией дисторсии HAL отдаёт обоим кадрам одного запроса одинаковую метку;
   без неё метки физических камер различаются на 10–28 мс и допуск склейки (15 мс) перестаёт работать.
-- Тема `Theme.AppCompat` — компоненты Material, требующие `Theme.MaterialComponents`
-  (MaterialButton и т.п.), упадут. FAB работает.
+- Интерфейс — Material 3 (`material:1.13.0`, тема `Theme.Material3.DynamicColors.Dark`):
+  цвета берутся из обоев, как в Google Камере. Кнопка спуска — свои drawable `shutter_*`.
+  Кнопки в разметке объявлять как `MaterialButton`, а не `<Button>`, иначе view binding
+  даст тип без `isChecked`. У `ShapeableImageView` не менять отступы на лету — маска формы не пересчитается.
 - Геометрия совмещения реализована дважды: в шейдере (`StereoRenderer.renderEye`) и в
   `StillComposer.eyeMatrix` для полноразмерного фото. Меняя одну — менять и другую.
 - Сборка фото 6048×4032 на CPU требует ~160 МБ памяти, поэтому в манифесте `largeHeap`.

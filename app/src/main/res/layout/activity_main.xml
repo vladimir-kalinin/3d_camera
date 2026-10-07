@@ -5,11 +5,26 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
+    <!-- Верхняя строка: технические параметры потока -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginTop="16dp"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
     <TextureView
         android:id="@+id/preview"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="48dp"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintDimensionRatio="3:2"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -29,163 +44,247 @@
         android:id="@+id/recordingIndicator"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="8dp"
-        android:background="#99000000"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="2dp"
-        android:textColor="#FFFF4444"
-        android:textStyle="bold"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/bg_pill"
+        android:backgroundTint="@color/record_red"
+        android:fontFamily="sans-serif-medium"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="4dp"
+        android:textColor="@color/white"
+        android:textSize="15sp"
         android:visibility="gone"
-        app:layout_constraintStart_toStartOf="@id/preview"
-        app:layout_constraintTop_toTopOf="@id/preview" />
+        app:layout_constraintBottom_toTopOf="@id/preview"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <TextView
-        android:id="@+id/statusText"
-        android:layout_width="0dp"
+        android:id="@+id/warningText"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_pill"
+        android:backgroundTint="?attr/colorErrorContainer"
+        android:fontFamily="sans-serif-medium"
         android:gravity="center"
-        android:textColor="#B3FFFFFF"
-        android:textSize="12sp"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
+        android:textColor="?attr/colorOnErrorContainer"
+        android:textSize="13sp"
+        android:visibility="gone"
+        app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/preview" />
 
-    <TextView
-        android:id="@+id/warningText"
+    <!-- Карточка подстройки совмещения, открывается кнопкой справа внизу -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/calibrationPanel"
+        style="?attr/materialCardViewFilledStyle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="4dp"
-        android:gravity="center"
-        android:textColor="#FFFFB74D"
-        android:textSize="13sp"
+        android:layout_marginBottom="24dp"
         android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusText" />
-
-    <LinearLayout
-        android:id="@+id/calibrationPanel"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:orientation="vertical"
-        android:paddingHorizontal="16dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/warningText">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/calibration_scale"
-                android:textColor="@color/white" />
-
-            <TextView
-                android:id="@+id/scaleValue"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/white" />
-        </LinearLayout>
-
-        <SeekBar
-            android:id="@+id/scaleSeekBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:max="200" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/calibration_vertical"
-                android:textColor="@color/white" />
-
-            <TextView
-                android:id="@+id/verticalValue"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/white" />
-        </LinearLayout>
-
-        <SeekBar
-            android:id="@+id/verticalSeekBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="200" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/modeSwitch"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="20dp"
-        android:orientation="horizontal"
+        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+        app:cardCornerRadius="28dp"
         app:layout_constraintBottom_toTopOf="@id/shutterButton"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <TextView
-            android:id="@+id/photoModeButton"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?attr/selectableItemBackground"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp"
-            android:text="@string/mode_photo"
-            android:textAllCaps="true"
-            android:textColor="@color/white" />
+            android:orientation="vertical"
+            android:paddingStart="20dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
 
-        <TextView
-            android:id="@+id/videoModeButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="?attr/selectableItemBackground"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp"
-            android:text="@string/mode_video"
-            android:textAllCaps="true"
-            android:textColor="@color/white" />
-    </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-    <ImageButton
-        android:id="@+id/menuButton"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/menu"
-        android:src="@drawable/ic_more"
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/calibration_title"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/resetCalibrationButton"
+                    style="?attr/borderlessButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/reset_calibration" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/calibration_scale"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/scaleValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+            </LinearLayout>
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/scaleSlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/calibration_scale"
+                android:stepSize="1"
+                android:valueFrom="0"
+                android:valueTo="200"
+                app:labelBehavior="gone"
+                app:tickVisible="false" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/calibration_vertical"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/verticalValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+            </LinearLayout>
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/verticalSlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/calibration_vertical"
+                android:stepSize="1"
+                android:valueFrom="0"
+                android:valueTo="200"
+                app:labelBehavior="gone"
+                app:tickVisible="false" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Ряд спуска: последний снимок · спуск · поменять глаза -->
+    <com.google.android.material.imageview.ShapeableImageView
+        android:id="@+id/galleryButton"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
+        android:background="?attr/colorSurfaceContainerHighest"
+        android:contentDescription="@string/open_gallery"
+        android:scaleType="center"
+        android:src="@drawable/ic_photo_library"
+        android:stateListAnimator="@animator/press_scale"
         app:layout_constraintBottom_toBottomOf="@id/shutterButton"
         app:layout_constraintEnd_toStartOf="@id/shutterButton"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/shutterButton" />
+        app:layout_constraintTop_toTopOf="@id/shutterButton"
+        app:shapeAppearanceOverlay="@style/ShapeAppearance.My3DCamera.Thumbnail"
+        app:tint="?attr/colorOnSurfaceVariant" />
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
+    <ImageButton
         android:id="@+id/shutterButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="48dp"
-        android:contentDescription="@string/record_video"
-        android:src="@drawable/ic_record"
-        app:backgroundTint="@color/white"
-        app:fabCustomSize="72dp"
-        app:maxImageSize="40dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_width="84dp"
+        android:layout_height="84dp"
+        android:layout_marginBottom="28dp"
+        android:background="@null"
+        android:contentDescription="@string/take_photo"
+        android:scaleType="fitCenter"
+        android:src="@drawable/shutter_photo"
+        android:stateListAnimator="@animator/press_scale"
+        app:layout_constraintBottom_toTopOf="@id/modeSwitch"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/swapEyesButton"
+        style="@style/Widget.My3DCamera.ToggleIconButton"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:contentDescription="@string/swap_eyes"
+        app:icon="@drawable/ic_swap_eyes"
+        app:iconSize="28dp"
+        app:layout_constraintBottom_toBottomOf="@id/shutterButton"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/shutterButton"
+        app:layout_constraintTop_toTopOf="@id/shutterButton"
+        app:shapeAppearance="?attr/shapeAppearanceCornerLarge" />
+
+    <!-- Нижний ряд: о камерах · фото/видео · подстройка -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/aboutButton"
+        style="@style/Widget.My3DCamera.IconButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="24dp"
+        android:contentDescription="@string/about"
+        app:icon="@drawable/ic_info"
+        app:layout_constraintBottom_toBottomOf="@id/modeSwitch"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="@id/modeSwitch" />
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/modeSwitch"
+        style="@style/Widget.Material3.MaterialButtonGroup.Connected"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/photoModeButton"
+            style="@style/Widget.My3DCamera.ToggleIconButton"
+            android:layout_width="72dp"
+            android:layout_height="56dp"
+            android:contentDescription="@string/mode_photo"
+            app:icon="@drawable/ic_photo_camera" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/videoModeButton"
+            style="@style/Widget.My3DCamera.ToggleIconButton"
+            android:layout_width="72dp"
+            android:layout_height="56dp"
+            android:contentDescription="@string/mode_video"
+            app:icon="@drawable/ic_videocam" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/calibrationButton"
+        style="@style/Widget.My3DCamera.ToggleIconButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginEnd="24dp"
+        android:contentDescription="@string/calibration_title"
+        app:icon="@drawable/ic_tune"
+        app:layout_constraintBottom_toBottomOf="@id/modeSwitch"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/modeSwitch" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,14 +1,15 @@
 <resources>
     <string name="app_name">Stereo Camera</string>
-    <string name="menu">Меню</string>
     <string name="record_video">Записать видео</string>
     <string name="stop_video">Остановить запись</string>
     <string name="take_photo">Сделать фото</string>
     <string name="mode_photo">Фото</string>
     <string name="mode_video">Видео</string>
+    <string name="open_gallery">Открыть последний снимок</string>
+    <string name="calibration_title">Совмещение глаз</string>
     <string name="calibration_scale">Масштаб широкоугольной</string>
     <string name="calibration_vertical">Сдвиг по вертикали</string>
     <string name="swap_eyes">Поменять глаза местами</string>
-    <string name="reset_calibration">Сбросить подстройку</string>
+    <string name="reset_calibration">Сбросить</string>
     <string name="about">О камерах</string>
 </resources>

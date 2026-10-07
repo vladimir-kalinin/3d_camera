@@ -1,7 +1,6 @@
 package com.example.my_3d_camera
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
@@ -17,14 +16,15 @@ import android.util.Log
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
 import android.view.WindowManager
-import android.widget.PopupMenu
-import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.slider.Slider
 import com.example.my_3d_camera.camera.CaptureMode
 import com.example.my_3d_camera.camera.StereoCamera
 import com.example.my_3d_camera.camera.StereoRig
@@ -59,6 +59,8 @@ class MainActivity : AppCompatActivity() {
     private var streamInfo = ""
     private var permissionAsked = false
     private var cameraStalled = false
+    /** Последний снимок или видео — открывается по нажатию на миниатюру. */
+    private var lastMediaUri: Uri? = null
     private var thermalStatus = PowerManager.THERMAL_STATUS_NONE
     private val thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
         thermalStatus = status
@@ -101,11 +103,21 @@ class MainActivity : AppCompatActivity() {
         binding.shutterButton.setOnClickListener {
             if (mode == CaptureMode.PHOTO) takePhoto() else toggleRecording()
         }
-        binding.photoModeButton.setOnClickListener { switchMode(CaptureMode.PHOTO) }
-        binding.videoModeButton.setOnClickListener { switchMode(CaptureMode.VIDEO) }
         updateShutterUi()
-        binding.menuButton.setOnClickListener { showMenu() }
+        binding.modeSwitch.addOnButtonCheckedListener { _, id, isChecked ->
+            if (isChecked) switchMode(if (id == R.id.photoModeButton) CaptureMode.PHOTO else CaptureMode.VIDEO)
+        }
+        binding.galleryButton.setOnClickListener { openLastMedia() }
+        binding.swapEyesButton.isChecked = calibration.swapEyes
+        binding.swapEyesButton.setOnClickListener { toggleSwapEyes() }
+        binding.aboutButton.setOnClickListener { showAbout() }
+        binding.calibrationButton.setOnClickListener { toggleCalibrationPanel() }
+        binding.resetCalibrationButton.setOnClickListener { resetCalibration() }
         setupCalibrationControls()
+        io.execute {
+            saver.moveToCommonFolder()
+            saver.latestMedia()?.let { showLastMedia(it) }
+        }
     }
 
     override fun onResume() {
@@ -217,9 +229,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateShutterUi() {
         val icon = when {
-            isRecording -> R.drawable.ic_stop
-            mode == CaptureMode.PHOTO -> R.drawable.ic_photo
-            else -> R.drawable.ic_record
+            isRecording -> R.drawable.shutter_stop
+            mode == CaptureMode.PHOTO -> R.drawable.shutter_photo
+            else -> R.drawable.shutter_video
         }
         binding.shutterButton.setImageResource(icon)
         binding.shutterButton.contentDescription = getString(
@@ -229,14 +241,13 @@ class MainActivity : AppCompatActivity() {
                 else -> R.string.record_video
             }
         )
-        for ((button, buttonMode) in listOf(
-            binding.photoModeButton to CaptureMode.PHOTO,
-            binding.videoModeButton to CaptureMode.VIDEO,
-        )) {
-            val selected = buttonMode == mode
-            button.setTextColor(if (selected) 0xFFFFD54F.toInt() else 0xB3FFFFFF.toInt())
-            button.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
-            button.isEnabled = !isRecording
+        binding.modeSwitch.check(if (mode == CaptureMode.PHOTO) R.id.photoModeButton else R.id.videoModeButton)
+        // Во время записи всё, что перезапускает камеру или открывает другие экраны, недоступно
+        binding.photoModeButton.isEnabled = !isRecording
+        binding.videoModeButton.isEnabled = !isRecording
+        for (view in listOf(binding.galleryButton, binding.aboutButton)) {
+            view.isEnabled = !isRecording
+            view.animate().alpha(if (isRecording) 0f else 1f).setDuration(150)
         }
     }
 
@@ -280,7 +291,7 @@ class MainActivity : AppCompatActivity() {
             else -> null
         }
         binding.warningText.text = text
-        binding.warningText.visibility = if (text != null) android.view.View.VISIBLE else android.view.View.GONE
+        binding.warningText.visibility = if (text != null) View.VISIBLE else View.GONE
     }
 
     // ---------- Фото ----------
@@ -298,19 +309,18 @@ class MainActivity : AppCompatActivity() {
             val calibration = calibration
             camera.captureStill { still ->
                 if (still == null) {
-                    onPhotoSaved(null, "")
+                    onPhotoSaved(null)
                     return@captureStill
                 }
                 io.execute {
                     val uri = try {
                         val bitmap = StillComposer.compose(rig, calibration, still.wideJpeg, still.mainJpeg)
-                        val size = "${bitmap.width}×${bitmap.height}"
-                        saver.savePhoto(bitmap).also { bitmap.recycle() }?.let { it to size }
+                        saver.savePhoto(bitmap).also { bitmap.recycle() }
                     } catch (e: Throwable) {
                         Log.e(TAG, "Не удалось собрать фото", e)
                         null
                     }
-                    onPhotoSaved(uri?.first, uri?.second ?: "")
+                    onPhotoSaved(uri)
                 }
             }
         } else {
@@ -318,17 +328,47 @@ class MainActivity : AppCompatActivity() {
             renderer.capturePhoto { pixels, width, height ->
                 io.execute {
                     val uri = saver.savePhoto(pixels, width, height)
-                    onPhotoSaved(uri, "${width}×${height}")
+                    onPhotoSaved(uri)
                 }
             }
         }
     }
 
-    private fun onPhotoSaved(uri: Uri?, size: String) {
+    private fun onPhotoSaved(uri: Uri?) {
+        if (uri != null) showLastMedia(uri)
         runOnUiThread {
             binding.shutterButton.isEnabled = true
-            val text = if (uri != null) "Фото сохранено ($size)" else "Не удалось сохранить фото"
-            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+            if (uri == null) Toast.makeText(this, "Не удалось сохранить фото", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ---------- Миниатюра последнего снимка ----------
+
+    /** Загружает миниатюру и показывает её на кнопке галереи. Вызывать не на UI-потоке. */
+    private fun showLastMedia(uri: Uri) {
+        val size = resources.getDimensionPixelSize(R.dimen.thumbnail_size)
+        val thumbnail = saver.loadThumbnail(uri, size)
+        runOnUiThread {
+            lastMediaUri = uri
+            if (thumbnail == null) return@runOnUiThread
+            binding.galleryButton.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            binding.galleryButton.imageTintList = null
+            binding.galleryButton.setImageBitmap(thumbnail)
+            binding.galleryButton.scaleX = 0.6f
+            binding.galleryButton.scaleY = 0.6f
+            binding.galleryButton.animate().scaleX(1f).scaleY(1f).setDuration(200)
+        }
+    }
+
+    private fun openLastMedia() {
+        val uri = lastMediaUri ?: return
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, contentResolver.getType(uri))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Нет приложения для просмотра", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -375,10 +415,10 @@ class MainActivity : AppCompatActivity() {
             // Рендерер перестаёт рисовать в поверхность энкодера до остановки MediaRecorder
             renderer?.stopRecording()
             val uri = videoRecorder.stop()
+            if (uri != null) showLastMedia(uri)
             runOnUiThread {
                 binding.shutterButton.isEnabled = true
-                val text = if (uri != null) "Видео сохранено в галерею" else "Видео не записалось"
-                Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+                if (uri == null) Toast.makeText(this, "Видео не записалось", Toast.LENGTH_SHORT).show()
             }
         }
         if (wait) task.get()
@@ -386,7 +426,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateRecordingUi() {
         updateShutterUi()
-        binding.recordingIndicator.visibility = if (isRecording) android.view.View.VISIBLE else android.view.View.GONE
+        binding.recordingIndicator.visibility = if (isRecording) View.VISIBLE else View.GONE
         mainHandler.removeCallbacks(recordingTicker)
         if (isRecording) recordingTicker.run()
     }
@@ -402,25 +442,26 @@ class MainActivity : AppCompatActivity() {
     // ---------- Подстройка совмещения ----------
 
     private fun setupCalibrationControls() {
-        binding.scaleSeekBar.progress = scaleToProgress(calibration.scale)
-        binding.verticalSeekBar.progress = shiftToProgress(calibration.verticalShift)
+        binding.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
+        binding.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
         updateCalibrationLabels()
 
-        val listener = object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                calibration = calibration.copy(
-                    scale = progressToScale(binding.scaleSeekBar.progress),
-                    verticalShift = progressToShift(binding.verticalSeekBar.progress),
-                )
-                applyCalibration()
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar) = saveCalibration()
+        val changeListener = Slider.OnChangeListener { _, _, fromUser ->
+            if (!fromUser) return@OnChangeListener
+            calibration = calibration.copy(
+                scale = progressToScale(binding.scaleSlider.value.toInt()),
+                verticalShift = progressToShift(binding.verticalSlider.value.toInt()),
+            )
+            applyCalibration()
         }
-        binding.scaleSeekBar.setOnSeekBarChangeListener(listener)
-        binding.verticalSeekBar.setOnSeekBarChangeListener(listener)
+        val touchListener = object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) = Unit
+            override fun onStopTrackingTouch(slider: Slider) = saveCalibration()
+        }
+        for (slider in listOf(binding.scaleSlider, binding.verticalSlider)) {
+            slider.addOnChangeListener(changeListener)
+            slider.addOnSliderTouchListener(touchListener)
+        }
     }
 
     private fun applyCalibration() {
@@ -457,32 +498,36 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    // ---------- Меню ----------
-
-    private fun showMenu() {
-        PopupMenu(this, binding.menuButton).apply {
-            menuInflater.inflate(R.menu.main_menu, menu)
-            menu.findItem(R.id.action_swap_eyes).isChecked = calibration.swapEyes
-            setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.action_swap_eyes -> {
-                        calibration = calibration.copy(swapEyes = !calibration.swapEyes)
-                        applyCalibration()
-                        saveCalibration()
-                    }
-                    R.id.action_reset_calibration -> {
-                        calibration = StereoRenderer.Calibration(swapEyes = calibration.swapEyes)
-                        binding.scaleSeekBar.progress = scaleToProgress(calibration.scale)
-                        binding.verticalSeekBar.progress = shiftToProgress(calibration.verticalShift)
-                        applyCalibration()
-                        saveCalibration()
-                    }
-                    R.id.action_about -> showAbout()
-                }
-                true
+    private fun toggleCalibrationPanel() {
+        val show = binding.calibrationPanel.visibility != View.VISIBLE
+        binding.calibrationPanel.visibility = if (show) View.VISIBLE else View.GONE
+        binding.calibrationButton.isChecked = show
+        // Превью стоит по центру экрана, карточка перекрыла бы его низ — поднимаем превью над ней
+        binding.calibrationPanel.post {
+            val overlap = if (show) binding.preview.bottom - binding.calibrationPanel.top + PANEL_GAP_PX else 0
+            val shift = -overlap.coerceAtLeast(0).toFloat()
+            for (view in listOf(binding.preview, binding.eyeDivider, binding.recordingIndicator, binding.warningText)) {
+                view.animate().translationY(shift).setDuration(200)
             }
-        }.show()
+        }
     }
+
+    private fun resetCalibration() {
+        calibration = StereoRenderer.Calibration(swapEyes = calibration.swapEyes)
+        binding.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
+        binding.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
+        applyCalibration()
+        saveCalibration()
+    }
+
+    private fun toggleSwapEyes() {
+        calibration = calibration.copy(swapEyes = !calibration.swapEyes)
+        binding.swapEyesButton.isChecked = calibration.swapEyes
+        applyCalibration()
+        saveCalibration()
+    }
+
+    // ---------- О камерах ----------
 
     private fun showAbout() {
         val rig = rig ?: return
@@ -497,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             $streamInfo
             Файлы: Галерея → ${MediaSaver.ALBUM}
         """.trimIndent()
-        AlertDialog.Builder(this).setTitle(R.string.about).setMessage(message).setPositiveButton("OK", null).show()
+        MaterialAlertDialogBuilder(this).setTitle(R.string.about).setMessage(message).setPositiveButton("OK", null).show()
     }
 
     // ---------- Разрешения ----------
@@ -506,7 +551,7 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun showPermissionDeniedDialog() {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Нужен доступ к камере")
             .setMessage("Без разрешения на камеру приложение не может работать. Микрофон нужен только для звука в видео.")
             .setPositiveButton("Открыть настройки") { _, _ ->
@@ -524,5 +569,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_VERTICAL = "vertical_shift"
         private const val KEY_SWAP = "swap_eyes"
         private const val KEY_MODE = "capture_mode"
+        private const val PANEL_GAP_PX = 32
     }
 }
