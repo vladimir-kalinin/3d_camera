@@ -27,7 +27,10 @@ data class StereoRig(
     /** Расстояние между объективами в метрах, если известно. */
     val baselineMeters: Float?,
     val timestampSourceRealtime: Boolean,
+    /** Постоянные 30 fps для видео. */
     val fpsRange: Range<Int>,
+    /** Плавающий диапазон для фото: в темноте AE может удлинить выдержку вместо подъёма ISO. */
+    val photoFpsRange: Range<Int>,
 ) {
     data class PhysicalCamera(
         val id: String,
@@ -130,11 +133,13 @@ data class StereoRig(
                 val fpsRange = fpsRanges.firstOrNull { it.lower == 30 && it.upper == 30 }
                     ?: fpsRanges.filter { it.upper == 30 }.maxByOrNull { it.lower }
                     ?: Range(30, 30)
+                val photoFpsRange = fpsRanges.filter { it.upper == fpsRange.upper }.minByOrNull { it.lower } ?: fpsRange
 
-                val rig = StereoRig(id, wide, main, wideIsLeft, baseline, timestampRealtime, fpsRange)
+                val rig = StereoRig(id, wide, main, wideIsLeft, baseline, timestampRealtime, fpsRange, photoFpsRange)
                 Log.i(TAG, "Стереопара: логическая=$id, wide=${wide.id} (${wide.focalLengthMm}мм), " +
                         "main=${main.id} (${main.focalLengthMm}мм), кроп=${"%.3f".format(rig.wideCropFactor)}, " +
-                        "wideIsLeft=$wideIsLeft, база=${baseline?.let { "%.1f мм".format(it * 1000) }}, fps=$fpsRange")
+                        "wideIsLeft=$wideIsLeft, база=${baseline?.let { "%.1f мм".format(it * 1000) }}, " +
+                        "fps=$fpsRange, фото fps=$photoFpsRange")
                 return rig
             }
             return null

@@ -6,11 +6,13 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -138,8 +140,8 @@ class StereoCamera(
             mainReader = ImageReader.newInstance(mainJpeg.width, mainJpeg.height, ImageFormat.JPEG, 2).apply {
                 setOnImageAvailableListener({ onStillImage(it, isWide = false) }, handler)
             }
-            outputs += OutputConfiguration(wideReader!!.surface).apply { setPhysicalCameraId(rig.wide.id) }
-            outputs += OutputConfiguration(mainReader!!.surface).apply { setPhysicalCameraId(rig.main.id) }
+            outputs += stillOutput(wideReader!!.surface, rig.wide.id)
+            outputs += stillOutput(mainReader!!.surface, rig.main.id)
         }
 
         val config = SessionConfiguration(
@@ -152,7 +154,7 @@ class StereoCamera(
                     }
                     session = s
                     try {
-                        s.setRepeatingRequest(buildRequest(camera, CameraDevice.TEMPLATE_RECORD).build(), null, handler)
+                        s.setRepeatingRequest(buildRequest(camera).build(), null, handler)
                         listener.onStarted(plan.wideSize, plan.mainSize, plan.withStills)
                     } catch (e: Exception) {
                         Log.e(TAG, "Не удалось запустить поток кадров", e)
@@ -182,7 +184,7 @@ class StereoCamera(
             emptyList()
         }
         probes.forEachIndexed { i, reader ->
-            outputs += OutputConfiguration(reader.surface).apply { setPhysicalCameraId(if (i == 0) rig.wide.id else rig.main.id) }
+            outputs += stillOutput(reader.surface, if (i == 0) rig.wide.id else rig.main.id)
         }
         val config = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outputs, executor,
             object : CameraCaptureSession.StateCallback() {
@@ -200,17 +202,32 @@ class StereoCamera(
         }
     }
 
-    private fun buildRequest(camera: CameraDevice, template: Int): CaptureRequest.Builder {
+    /** JPEG-поток с пометкой «фото»: HAL может выбрать для него более качественную обработку. */
+    private fun stillOutput(surface: Surface, physicalId: String) = OutputConfiguration(surface).apply {
+        setPhysicalCameraId(physicalId)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setStreamUseCase(CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_STILL_CAPTURE.toLong())
+        }
+    }
+
+    /**
+     * Повторяющийся запрос (или основа снимка). В режиме фото — шаблон превью и плавающий fps:
+     * видеопресет держит выдержку не длиннее 1/30 с, и в темноте AE поднимает ISO,
+     * а шумодав съедает детали.
+     */
+    private fun buildRequest(camera: CameraDevice, template: Int = defaultTemplate()): CaptureRequest.Builder {
         val (wideSurface, mainSurface) = previewSurfaces!!
         val physicalIds = setOf(rig.wide.id, rig.main.id)
+        val photo = mode == CaptureMode.PHOTO
         return camera.createCaptureRequest(template, physicalIds).apply {
             addTarget(wideSurface)
             addTarget(mainSurface)
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-            set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+            set(CaptureRequest.CONTROL_AF_MODE,
+                if (photo) CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE else CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, rig.fpsRange)
+            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, if (photo) rig.photoFpsRange else rig.fpsRange)
             // Стабилизация смещает кадры камер независимо друг от друга и ломает стерео
             set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
@@ -218,6 +235,9 @@ class StereoCamera(
             set(CaptureRequest.DISTORTION_CORRECTION_MODE, CaptureRequest.DISTORTION_CORRECTION_MODE_FAST)
         }
     }
+
+    private fun defaultTemplate() =
+        if (mode == CaptureMode.PHOTO) CameraDevice.TEMPLATE_PREVIEW else CameraDevice.TEMPLATE_RECORD
 
     // ---------- Полноразмерное фото ----------
 
@@ -247,7 +267,8 @@ class StereoCamera(
                 val request = buildRequest(camera, CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(wr.surface)
                     addTarget(mr.surface)
-                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+                    set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
                     set(CaptureRequest.JPEG_QUALITY, 95.toByte())
                     // Поворачиваем сами при сборке SBS, поэтому JPEG — в ориентации сенсора
                     set(CaptureRequest.JPEG_ORIENTATION, 0)
