@@ -24,7 +24,7 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
 
 - Release: `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`,
   id `com.example.my_3d_camera.release`, подписана debug-ключом (`~/.android/debug.keystore`) —
-  только для личной установки. Debug-версия называется на телефоне «3D Камера dev»
+  только для личной установки. Debug-версия называется на телефоне «Stereo Camera dev»
   (`app/src/debug/res/values/strings.xml`). Настройки калибровки у сборок раздельные.
 - Debug-сборка имеет id `com.example.my_3d_camera.dev`. На телефоне также стоит старая версия
   `com.example.my_3d_camera` с другим ключом подписи и ~1 ГБ видео в её личной папке.

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">3D Камера</string>
+    <string name="app_name">Stereo Camera</string>
     <string name="menu">Меню</string>
     <string name="record_video">Записать видео</string>
     <string name="stop_video">Остановить запись</string>

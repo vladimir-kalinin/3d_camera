@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Монохромная иконка для тематических иконок Android 13+ -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.84" android:scaleY="0.84">
+    <path android:fillColor="#FF000000" android:pathData="M27,44H81A5,5 0,0 1,86,49V69A5,5 0,0 1,81,74H27A5,5 0,0 1,22,69V49A5,5 0,0 1,27,44ZM27.5,40.5H80.5A1.5,1.5 0,0 1,82,42V44A1.5,1.5 0,0 1,80.5,45.5H27.5A1.5,1.5 0,0 1,26,44V42A1.5,1.5 0,0 1,27.5,40.5ZM29.2,60a10.8,10.8 0,1 0,21.6,0a10.8,10.8 0,1 0,-21.6,0ZM57.2,60a10.8,10.8 0,1 0,21.6,0a10.8,10.8 0,1 0,-21.6,0ZM50.7,55H57.3A1.2,1.2 0,0 1,58.5,56.2V63.8A1.2,1.2 0,0 1,57.3,65H50.7A1.2,1.2 0,0 1,49.5,63.8V56.2A1.2,1.2 0,0 1,50.7,55Z" android:fillType="evenOdd" />
+    <path android:fillColor="#FF000000" android:pathData="M26,35H37A1.5,1.5 0,0 1,38.5,36.5V39.5A1.5,1.5 0,0 1,37,41H26A1.5,1.5 0,0 1,24.5,39.5V36.5A1.5,1.5 0,0 1,26,35ZM71,35H82A1.5,1.5 0,0 1,83.5,36.5V39.5A1.5,1.5 0,0 1,82,41H71A1.5,1.5 0,0 1,69.5,39.5V36.5A1.5,1.5 0,0 1,71,35ZM49.5,38.5H58.5A1.5,1.5 0,0 1,60,40V40.5A1.5,1.5 0,0 1,58.5,42H49.5A1.5,1.5 0,0 1,48,40.5V40A1.5,1.5 0,0 1,49.5,38.5Z" />
+    <path android:fillColor="#FF000000" android:pathData="M30.8,60a9.2,9.2 0,1 0,18.4,0a9.2,9.2 0,1 0,-18.4,0ZM58.8,60a9.2,9.2 0,1 0,18.4,0a9.2,9.2 0,1 0,-18.4,0Z" />
+    <path android:fillColor="#FF000000" android:pathData="M34,60a6,6 0,1 0,12,0a6,6 0,1 0,-12,0ZM62,60a6,6 0,1 0,12,0a6,6 0,1 0,-12,0Z" android:fillType="evenOdd" />
+    </group>
+</vector>
