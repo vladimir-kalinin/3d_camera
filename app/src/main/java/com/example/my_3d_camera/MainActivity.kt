@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.util.Size
+import android.view.KeyEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -147,6 +148,22 @@ class MainActivity : AppCompatActivity() {
         previewSurface = null
         super.onDestroy()
     }
+
+    // ---------- Кнопки громкости ----------
+
+    /** Кнопки громкости работают как спуск: снимок в режиме фото, старт/стоп записи в режиме видео. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (!isShutterKey(keyCode)) return super.onKeyDown(keyCode, event)
+        // Удержание кнопки не должно делать серию снимков или сразу останавливать запись
+        if (event.repeatCount == 0 && binding.shutterButton.isEnabled) binding.shutterButton.performClick()
+        return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        isShutterKey(keyCode) || super.onKeyUp(keyCode, event)
+
+    private fun isShutterKey(keyCode: Int) =
+        rig != null && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
 
     // ---------- Камера и рендерер ----------
 
