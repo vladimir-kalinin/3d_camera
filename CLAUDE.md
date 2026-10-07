@@ -57,7 +57,9 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
 - `SENSOR_INFO_TIMESTAMP_SOURCE = REALTIME`, синхронизация сенсоров `APPROXIMATE`:
   реальные экспозиции расходятся на 10–28 мс. Это предел железа.
 - Физические камеры принимают ключи: sensitivity, exposureTime, colorCorrection gains/transform,
-  zoomRatio, focusDistance, aeExposureCompensation.
+  zoomRatio, focusDistance, aeExposureCompensation. `CONTROL_AWB_MODE` — только общий для логической,
+  а gains/transform действуют лишь при выключенном AWB, и у сенсоров разные цветовые матрицы.
+  Поэтому цвет глаз выравнивается программно (`ColorMatch`), а не ключами камеры.
 - JPEG у обеих физических камер — до 4032×3024 (`ImageFormat.JPEG` в карте физической камеры).
 - Аппаратный H.264-энкодер `c2.exynos.h264.encoder` — до 7680×4320.
 
@@ -85,6 +87,9 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
   даст тип без `isChecked`. У `ShapeableImageView` не менять отступы на лету — маска формы не пересчитается.
 - Геометрия совмещения реализована дважды: в шейдере (`StereoRenderer.renderEye`) и в
   `StillComposer.eyeMatrix` для полноразмерного фото. Меняя одну — менять и другую.
+- Цвет широкоугольной подгоняется под основную (AWB/AE камер независимы, на закатах глаза расходились):
+  в видео — коэффициенты в шейдере по замеру уменьшенных кадров глаз (`updateColorMatch`, на fps не влияет),
+  в фото — заново по паре JPEG (`StillComposer.colorGains`).
 - Сборка фото 6048×4032 на CPU требует ~160 МБ памяти, поэтому в манифесте `largeHeap`.
 - Камера должна закрываться в `onPause`; порядок закрытия: запись → камера → рендерер.
 
@@ -97,7 +102,8 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
 
 ## Открытые задачи
 
-- Выровнять экспозицию и баланс белого между глазами (через физические ключи камеры).
+- Проверить выравнивание цвета на реальном закате (замер исключает пересвеченные точки — если
+  небо почти всё пересвечено, коэффициенты не обновляются).
 - Проверить длительную запись (нагрев, размер файлов).
 - Перенести видео из старой версии приложения (они в её личной папке `Android/data/...`),
   затем её можно удалить. 68 фото старой версии лежат в общем `Pictures/` и при удалении сохранятся.

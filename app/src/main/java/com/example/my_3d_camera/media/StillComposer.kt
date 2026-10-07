@@ -4,11 +4,14 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import com.example.my_3d_camera.camera.StereoRig
+import com.example.my_3d_camera.gl.ColorMatch
 import com.example.my_3d_camera.gl.StereoRenderer
 
 /**
@@ -16,6 +19,8 @@ import com.example.my_3d_camera.gl.StereoRenderer
  * Геометрия та же, что в GL-рендерере: поворот в портрет, кроп широкоугольной до поля
  * зрения основной с совмещением оптических центров и ручная подстройка.
  * Глаз = полный кадр основной камеры, повёрнутый в портрет.
+ * Цвет широкоугольной подгоняется под основную (см. [ColorMatch]) по этой же паре кадров:
+ * у полноразмерного снимка своя обработка, коэффициенты превью к нему не подходят.
  */
 object StillComposer {
 
@@ -66,10 +71,40 @@ object StillComposer {
             }
             // Пиксель (x, y) области = пиксель (x + left, y + top) полного кадра
             val regionMatrix = Matrix(wideMatrix).apply { preTranslate(region.left.toFloat(), region.top.toFloat()) }
-            drawClipped(canvas, wideBitmap, regionMatrix, wideX, eyeWidth, eyeHeight, paint)
+            val widePaint = Paint(paint)
+            colorGains(output, mainX, wideBitmap, regionMatrix, wideX, eyeWidth, eyeHeight)?.let { g ->
+                widePaint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(g[0], g[1], g[2], 1f) })
+            }
+            drawClipped(canvas, wideBitmap, regionMatrix, wideX, eyeWidth, eyeHeight, widePaint)
             wideBitmap.recycle()
         }
         return output
+    }
+
+    /**
+     * Сравнивает цвет глаз по сетке точек: основной глаз берётся из уже нарисованного
+     * кадра, широкоугольный — из исходного кадра через обратную матрицу.
+     */
+    private fun colorGains(
+        output: Bitmap, mainX: Int, wide: Bitmap, wideMatrix: Matrix, wideX: Int, eyeWidth: Int, eyeHeight: Int,
+    ): FloatArray? {
+        val inverse = Matrix().also { wideMatrix.invert(it) }
+        val match = ColorMatch()
+        val point = FloatArray(2)
+        for (gy in 0 until GRID_H) {
+            for (gx in 0 until GRID_W) {
+                val x = (gx + 0.5f) * eyeWidth / GRID_W
+                val y = (gy + 0.5f) * eyeHeight / GRID_H
+                point[0] = wideX + x
+                point[1] = y
+                inverse.mapPoints(point)
+                val wx = point[0].toInt()
+                val wy = point[1].toInt()
+                if (wx !in 0 until wide.width || wy !in 0 until wide.height) continue
+                match.addArgb(output.getPixel(mainX + x.toInt(), y.toInt()), wide.getPixel(wx, wy))
+            }
+        }
+        return match.gains()
     }
 
     private fun drawClipped(canvas: Canvas, bitmap: Bitmap, matrix: Matrix, x: Int, width: Int, height: Int, paint: Paint) {
@@ -105,4 +140,8 @@ object StillComposer {
         postScale(eyeWidth.toFloat(), eyeHeight.toFloat())
         postTranslate(offsetX.toFloat(), 0f)
     }
+
+    /** Сетка точек для сравнения цвета (портрет 3:4). */
+    private const val GRID_W = 96
+    private const val GRID_H = 128
 }

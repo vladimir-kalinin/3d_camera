@@ -18,6 +18,7 @@ import java.nio.FloatBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.pow
 
 /**
  * Собирает кадр Side-by-Side из двух камер на GPU в реальном времени.
@@ -123,6 +124,15 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     private var lastRecordPtsNs = 0L
     private var pendingPhoto: ((ByteBuffer, Int, Int) -> Unit)? = null
 
+    // Подгонка цвета широкоугольной под основную: замер по уменьшенным кадрам глаз
+    private var measureTexture = 0
+    private var measureFramebuffer = 0
+    private val measurePixels = ByteBuffer.allocateDirect(MEASURE_W * 2 * MEASURE_H * 4).order(ByteOrder.nativeOrder())
+    private val colorMatch = ColorMatch()
+    private var pairsSinceMeasure = 0
+    /** Текущие коэффициенты (R, G, B) для широкоугольного глаза. */
+    private val wideGain = floatArrayOf(1f, 1f, 1f)
+
     @Volatile var calibration = Calibration()
 
     /** Размер итогового кадра SBS (ширина обоих глаз вместе). */
@@ -156,6 +166,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
                 .asFloatBuffer().put(data).apply { position(0) }
             wide = EyeStream(isWide = true)
             main = EyeStream(isWide = false)
+            measureTexture = GlUtil.createTexture2D(MEASURE_W * 2, MEASURE_H)
+            measureFramebuffer = GlUtil.createFramebuffer(measureTexture)
         }
         return wide.surface to main.surface
     }
@@ -211,6 +223,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             recordSurface = null
             wide.release()
             main.release()
+            GLES20.glDeleteFramebuffers(1, intArrayOf(measureFramebuffer), 0)
+            GLES20.glDeleteTextures(1, intArrayOf(measureTexture), 0)
             cameraProgram.release()
             composeProgram.release()
             egl.releaseSurface(idleSurface)
@@ -254,9 +268,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             val s = 1f / (rig.wideCropFactor * cal.scale)
             val ou = rig.wide.principalU - rig.main.principalU * s
             val ov = rig.wide.principalV - rig.main.principalV * s + cal.verticalShift
-            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, s, ou, s, ov)
+            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, s, ou, s, ov, wideGain)
         } else {
-            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, 1f, 0f, 1f, 0f)
+            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, 1f, 0f, 1f, 0f, NO_GAIN)
         }
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
     }
@@ -320,8 +334,47 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         }
 
         egl.makeCurrent(idleSurface)
+        if (++pairsSinceMeasure >= MEASURE_EVERY_PAIRS) {
+            pairsSinceMeasure = 0
+            updateColorMatch(wideFrame.texture, mainFrame.texture)
+        }
         statsFrames++
         statsMaxSkewNs = maxOf(statsMaxSkewNs, abs(wideFrame.timestamp - mainFrame.timestamp))
+    }
+
+    /**
+     * Сравнивает цвет глаз по уменьшенным кадрам и плавно подстраивает коэффициенты.
+     * Замеряется уже подправленный широкоугольный кадр, поэтому коэффициент
+     * домножается на остаточную разницу, пока она не сойдётся к единице.
+     */
+    private fun updateColorMatch(wideTexture: Int, mainTexture: Int) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, measureFramebuffer)
+        GLES20.glViewport(0, 0, MEASURE_W, MEASURE_H)
+        composeProgram.draw(quad, mainTexture, flipY = false)
+        GLES20.glViewport(MEASURE_W, 0, MEASURE_W, MEASURE_H)
+        composeProgram.draw(quad, wideTexture, flipY = false)
+        measurePixels.rewind()
+        GLES20.glReadPixels(0, 0, MEASURE_W * 2, MEASURE_H, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, measurePixels)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+
+        colorMatch.reset()
+        val rowBytes = MEASURE_W * 2 * 4
+        for (y in 0 until MEASURE_H) {
+            for (x in 0 until MEASURE_W) {
+                val m = y * rowBytes + x * 4
+                val w = m + MEASURE_W * 4
+                colorMatch.add(
+                    measurePixels.get(m).toInt() and 0xFF, measurePixels.get(m + 1).toInt() and 0xFF,
+                    measurePixels.get(m + 2).toInt() and 0xFF,
+                    measurePixels.get(w).toInt() and 0xFF, measurePixels.get(w + 1).toInt() and 0xFF,
+                    measurePixels.get(w + 2).toInt() and 0xFF,
+                )
+            }
+        }
+        val residual = colorMatch.gains() ?: return
+        for (c in 0..2) {
+            wideGain[c] = (wideGain[c] * residual[c].pow(GAIN_SMOOTHING)).coerceIn(MIN_GAMMA_GAIN, MAX_GAMMA_GAIN)
+        }
     }
 
     private fun compose(left: Int, right: Int, width: Int, height: Int, flipY: Boolean) {
@@ -428,8 +481,10 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             precision highp float;
             varying vec2 vTex;
             uniform samplerExternalOES uTexture;
+            uniform vec3 uGain;
             void main() {
-                gl_FragColor = texture2D(uTexture, vTex);
+                vec4 color = texture2D(uTexture, vTex);
+                gl_FragColor = vec4(color.rgb * uGain, color.a);
             }
             """
         )
@@ -438,8 +493,12 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         private val uStMatrix = GLES20.glGetUniformLocation(program, "uStMatrix")
         private val uMap = GLES20.glGetUniformLocation(program, "uMap")
         private val uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+        private val uGain = GLES20.glGetUniformLocation(program, "uGain")
 
-        fun draw(quad: FloatBuffer, texture: Int, stMatrix: FloatArray, su: Float, ou: Float, sv: Float, ov: Float) {
+        fun draw(
+            quad: FloatBuffer, texture: Int, stMatrix: FloatArray,
+            su: Float, ou: Float, sv: Float, ov: Float, gain: FloatArray,
+        ) {
             GLES20.glUseProgram(program)
             bindQuad(quad, aPosition, aUv)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -447,6 +506,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             GLES20.glUniform1i(uTexture, 0)
             GLES20.glUniformMatrix4fv(uStMatrix, 1, false, stMatrix, 0)
             GLES20.glUniform4f(uMap, su, ou, sv, ov)
+            GLES20.glUniform3f(uGain, gain[0], gain[1], gain[2])
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
 
@@ -499,6 +559,17 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         private const val PAIR_TOLERANCE_NS = 15_000_000L
         /** Сколько обрезанных кадров каждой камеры можно держать в ожидании пары (~130 мс). */
         private const val RING_SIZE = 5
+
+        /** Размер уменьшенного кадра глаза для сравнения цвета (портрет 3:4). */
+        private const val MEASURE_W = 48
+        private const val MEASURE_H = 64
+        /** Замер цвета раз в столько пар (~7 раз в секунду). */
+        private const val MEASURE_EVERY_PAIRS = 4
+        /** Какую долю остаточной разницы убирать за один замер. */
+        private const val GAIN_SMOOTHING = 0.3f
+        private val MIN_GAMMA_GAIN = ColorMatch.MIN_GAIN.pow(1f / 2.2f)
+        private val MAX_GAMMA_GAIN = ColorMatch.MAX_GAIN.pow(1f / 2.2f)
+        private val NO_GAIN = floatArrayOf(1f, 1f, 1f)
 
         private fun bindQuad(quad: FloatBuffer, aPosition: Int, aUv: Int) {
             quad.position(0)
