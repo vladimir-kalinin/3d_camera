@@ -22,15 +22,32 @@ import kotlin.math.abs
 /**
  * Собирает кадр Side-by-Side из двух камер на GPU в реальном времени.
  *
- * Кадры камер приходят в две SurfaceTexture. Когда пришла новая пара кадров,
- * рендерер рисует SBS в превью, в поверхность энкодера (если идёт запись)
- * и во внеэкранный буфер (если запрошено фото).
+ * Камеры отдают кадры в две SurfaceTexture. Кадры двух камер приходят в произвольном
+ * порядке и с разбросом до нескольких кадров, поэтому каждый кадр сразу забирается
+ * у камеры (иначе ей не хватит буферов и она начнёт пропускать кадры) и рисуется
+ * уже обрезанным в кольцевой буфер «глаза». Из этих буферов собираются пары кадров
+ * с одинаковым временем съёмки и рисуются в превью, в энкодер и в фото.
  */
 class StereoRenderer(private val rig: StereoRig, private val listener: Listener) {
 
     interface Listener {
         /** Вызывается раз в секунду с потока рендерера. */
-        fun onStats(fps: Float, maxPairSkewMs: Float)
+        fun onStats(stats: Stats)
+    }
+
+    data class Stats(
+        /** Сколько пар кадров в секунду собрано. */
+        val fps: Float,
+        /** Наибольшая разница времени съёмки внутри пары. */
+        val maxPairSkewMs: Float,
+        /** Кадры, выброшенные без пары. */
+        val droppedFrames: Int,
+        /** Сколько кадров за секунду пришло от каждой камеры. */
+        val wideFrames: Int,
+        val mainFrames: Int,
+    ) {
+        /** Одна из камер перестала отдавать кадры (так бывает при перегреве телефона). */
+        val cameraStalled: Boolean get() = (wideFrames == 0) != (mainFrames == 0)
     }
 
     /** Ручная подстройка поверх автоматической калибровки. */
@@ -43,32 +60,63 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         val swapEyes: Boolean = false,
     )
 
+    /** Обрезанный кадр одной камеры, ждущий пару. */
+    private class EyeFrame(val texture: Int, val framebuffer: Int) {
+        var timestamp = 0L
+        var valid = false
+    }
+
+    /** Камера: её SurfaceTexture и кольцевой буфер обрезанных кадров. */
+    private inner class EyeStream(val isWide: Boolean) {
+        val oesTexture = GlUtil.createExternalTexture()
+        val surfaceTexture = SurfaceTexture(oesTexture).apply {
+            setOnFrameAvailableListener({ onFrameAvailable(this@EyeStream) }, handler)
+        }
+        val surface = Surface(surfaceTexture)
+        val stMatrix = FloatArray(16)
+        var frames: List<EyeFrame> = emptyList()
+
+        fun allocate(width: Int, height: Int) {
+            releaseFrames()
+            frames = List(RING_SIZE) {
+                val tex = GlUtil.createTexture2D(width, height)
+                EyeFrame(tex, GlUtil.createFramebuffer(tex))
+            }
+        }
+
+        /** Слот для нового кадра: свободный, а если таких нет — самый старый. */
+        fun freeSlot(): EyeFrame {
+            frames.firstOrNull { !it.valid }?.let { return it }
+            statsDropped++
+            return frames.minBy { it.timestamp }
+        }
+
+        fun releaseFrames() {
+            for (frame in frames) {
+                GLES20.glDeleteFramebuffers(1, intArrayOf(frame.framebuffer), 0)
+                GLES20.glDeleteTextures(1, intArrayOf(frame.texture), 0)
+            }
+            frames = emptyList()
+        }
+
+        fun release() {
+            releaseFrames()
+            surface.release()
+            surfaceTexture.release()
+            GLES20.glDeleteTextures(1, intArrayOf(oesTexture), 0)
+        }
+    }
+
     private val thread = HandlerThread("StereoGL").apply { start() }
     private val handler = Handler(thread.looper)
 
     private lateinit var egl: EglCore
     private lateinit var idleSurface: EGLSurface
-    private var program = 0
-    private var aPosition = 0
-    private var aUv = 0
-    private var uStMatrix = 0
-    private var uMap = 0
-    private var uFlipY = 0
-    private var uTexture = 0
+    private lateinit var cameraProgram: CameraProgram
+    private lateinit var composeProgram: ComposeProgram
     private lateinit var quad: FloatBuffer
-
-    private var wideTexId = 0
-    private var mainTexId = 0
-    private lateinit var wideTexture: SurfaceTexture
-    private lateinit var mainTexture: SurfaceTexture
-    private lateinit var wideSurface: Surface
-    private lateinit var mainSurface: Surface
-    private val wideMatrix = FloatArray(16)
-    private val mainMatrix = FloatArray(16)
-    private var wideTimestamp = 0L
-    private var mainTimestamp = 0L
-    private var wideFresh = false
-    private var mainFresh = false
+    private lateinit var wide: EyeStream
+    private lateinit var main: EyeStream
 
     private var previewSurface: EGLSurface? = null
     private var recordSurface: EGLSurface? = null
@@ -84,6 +132,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     private var statsStart = 0L
     private var statsFrames = 0
     private var statsMaxSkewNs = 0L
+    private var statsDropped = 0
+    private var statsWideFrames = 0
+    private var statsMainFrames = 0
     private var released = false
 
     /** Инициализирует GL и возвращает поверхности для камер (wide, main). */
@@ -92,18 +143,32 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             egl = EglCore()
             idleSurface = egl.createPbufferSurface(1, 1)
             egl.makeCurrent(idleSurface)
-            initGl()
+            cameraProgram = CameraProgram()
+            composeProgram = ComposeProgram()
+            // x, y (clip space), u, v (координаты кадра, v вниз)
+            val data = floatArrayOf(
+                -1f, -1f, 0f, 1f,
+                1f, -1f, 1f, 1f,
+                -1f, 1f, 0f, 0f,
+                1f, 1f, 1f, 0f,
+            )
+            quad = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
+                .asFloatBuffer().put(data).apply { position(0) }
+            wide = EyeStream(isWide = true)
+            main = EyeStream(isWide = false)
         }
-        return wideSurface to mainSurface
+        return wide.surface to main.surface
     }
 
     /** Задаёт размеры потоков камер. Итоговый кадр = два портретных кадра основной камеры рядом. */
-    fun setStreamSizes(wideSize: Size, mainSize: Size) {
-        wideTexture.setDefaultBufferSize(wideSize.width, wideSize.height)
-        mainTexture.setDefaultBufferSize(mainSize.width, mainSize.height)
+    fun setStreamSizes(wideSize: Size, mainSize: Size) = runSync {
+        wide.surfaceTexture.setDefaultBufferSize(wideSize.width, wideSize.height)
+        main.surfaceTexture.setDefaultBufferSize(mainSize.width, mainSize.height)
         val rotated = rig.main.sensorOrientation % 180 != 0
         val eyeWidth = if (rotated) mainSize.height else mainSize.width
         val eyeHeight = if (rotated) mainSize.width else mainSize.height
+        wide.allocate(eyeWidth, eyeHeight)
+        main.allocate(eyeWidth, eyeHeight)
         outputSize = Size(eyeWidth * 2, eyeHeight)
     }
 
@@ -139,111 +204,134 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     fun release() {
         runSync {
             released = true
+            egl.makeCurrent(idleSurface)
             previewSurface?.let { egl.releaseSurface(it) }
             recordSurface?.let { egl.releaseSurface(it) }
             previewSurface = null
             recordSurface = null
-            wideSurface.release()
-            mainSurface.release()
-            wideTexture.release()
-            mainTexture.release()
-            GLES20.glDeleteTextures(2, intArrayOf(wideTexId, mainTexId), 0)
-            GLES20.glDeleteProgram(program)
+            wide.release()
+            main.release()
+            cameraProgram.release()
+            composeProgram.release()
             egl.releaseSurface(idleSurface)
             egl.release()
         }
         thread.quitSafely()
     }
 
-    private fun initGl() {
-        program = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-        aPosition = GLES20.glGetAttribLocation(program, "aPosition")
-        aUv = GLES20.glGetAttribLocation(program, "aUv")
-        uStMatrix = GLES20.glGetUniformLocation(program, "uStMatrix")
-        uMap = GLES20.glGetUniformLocation(program, "uMap")
-        uFlipY = GLES20.glGetUniformLocation(program, "uFlipY")
-        uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+    // ---------- Приём кадров ----------
 
-        // x, y (clip space), u, v (координаты кадра, v вниз)
-        val data = floatArrayOf(
-            -1f, -1f, 0f, 1f,
-            1f, -1f, 1f, 1f,
-            -1f, 1f, 0f, 0f,
-            1f, 1f, 1f, 0f,
-        )
-        quad = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
-            .asFloatBuffer().put(data).apply { position(0) }
-
-        val ids = IntArray(2)
-        GLES20.glGenTextures(2, ids, 0)
-        for (id in ids) {
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, id)
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        }
-        wideTexId = ids[0]
-        mainTexId = ids[1]
-        GlUtil.checkError("init textures")
-
-        wideTexture = SurfaceTexture(wideTexId).apply { setOnFrameAvailableListener({ onFrame(it) }, handler) }
-        mainTexture = SurfaceTexture(mainTexId).apply { setOnFrameAvailableListener({ onFrame(it) }, handler) }
-        wideSurface = Surface(wideTexture)
-        mainSurface = Surface(mainTexture)
-    }
-
-    private fun onFrame(texture: SurfaceTexture) {
+    private fun onFrameAvailable(stream: EyeStream) {
         if (released) return
         try {
             egl.makeCurrent(idleSurface)
-            texture.updateTexImage()
-            if (texture === wideTexture) {
-                wideTexture.getTransformMatrix(wideMatrix)
-                wideTimestamp = wideTexture.timestamp
-                wideFresh = true
-            } else {
-                mainTexture.getTransformMatrix(mainMatrix)
-                mainTimestamp = mainTexture.timestamp
-                mainFresh = true
-            }
-            // Кадры обеих камер приходят из одного запроса — рисуем, когда пришла пара
-            if (wideFresh && mainFresh) {
-                wideFresh = false
-                mainFresh = false
-                drawFrame()
-            }
+            // Забираем кадр сразу, чтобы буфер вернулся камере
+            stream.surfaceTexture.updateTexImage()
+            if (stream.isWide) statsWideFrames++ else statsMainFrames++
+            stream.surfaceTexture.getTransformMatrix(stream.stMatrix)
+            if (stream.frames.isEmpty()) return
+
+            val slot = stream.freeSlot()
+            renderEye(stream, slot)
+            slot.timestamp = stream.surfaceTexture.timestamp
+            slot.valid = true
+            drawReadyPairs()
+            reportStats()
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка рендеринга кадра", e)
+            Log.e(TAG, "Ошибка обработки кадра", e)
         }
     }
 
-    private fun drawFrame() {
-        val skew = abs(wideTimestamp - mainTimestamp)
+    /** Рисует кадр камеры с кропом и совмещением в текстуру глаза. */
+    private fun renderEye(stream: EyeStream, target: EyeFrame) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, target.framebuffer)
+        val size = outputSize
+        GLES20.glViewport(0, 0, size.width / 2, size.height)
+        if (stream.isWide) {
+            // Широкоугольный кадр увеличиваем до поля зрения основной камеры и совмещаем
+            // оптические центры: точка (u, v) основного кадра берётся из pw + (u - pm) * s
+            val cal = calibration
+            val s = 1f / (rig.wideCropFactor * cal.scale)
+            val ou = rig.wide.principalU - rig.main.principalU * s
+            val ov = rig.wide.principalV - rig.main.principalV * s + cal.verticalShift
+            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, s, ou, s, ov)
+        } else {
+            cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, 1f, 0f, 1f, 0f)
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+    }
+
+    /**
+     * Ищет пары кадров с одинаковым временем съёмки и рисует их по порядку.
+     * Кадры старше нарисованной пары уже не найдут себе пару — их выбрасываем.
+     */
+    private fun drawReadyPairs() {
+        while (true) {
+            var bestWide: EyeFrame? = null
+            var bestMain: EyeFrame? = null
+            for (w in wide.frames) {
+                if (!w.valid) continue
+                val m = main.frames.firstOrNull { it.valid && abs(it.timestamp - w.timestamp) <= PAIR_TOLERANCE_NS }
+                    ?: continue
+                if (bestWide == null || w.timestamp < bestWide.timestamp) {
+                    bestWide = w
+                    bestMain = m
+                }
+            }
+            if (bestWide == null || bestMain == null) return
+
+            val pairTime = minOf(bestWide.timestamp, bestMain.timestamp)
+            for (frame in wide.frames + main.frames) {
+                if (frame.valid && frame !== bestWide && frame !== bestMain && frame.timestamp < pairTime) {
+                    frame.valid = false
+                    statsDropped++
+                }
+            }
+            drawPair(bestWide, bestMain)
+            bestWide.valid = false
+            bestMain.valid = false
+        }
+    }
+
+    private fun drawPair(wideFrame: EyeFrame, mainFrame: EyeFrame) {
+        val wideLeft = rig.wideIsLeft != calibration.swapEyes
+        val left = if (wideLeft) wideFrame.texture else mainFrame.texture
+        val right = if (wideLeft) mainFrame.texture else wideFrame.texture
         val size = outputSize
 
         recordSurface?.let { surface ->
             egl.makeCurrent(surface)
-            drawSbs(size.width, size.height, flipY = false)
-            egl.setPresentationTime(surface, toMonotonicNs(mainTimestamp))
+            compose(left, right, size.width, size.height, flipY = false)
+            egl.setPresentationTime(surface, toMonotonicNs(mainFrame.timestamp))
             egl.swapBuffers(surface)
         }
 
         pendingPhoto?.let { callback ->
             pendingPhoto = null
             egl.makeCurrent(idleSurface)
-            val pixels = renderOffscreen(size.width, size.height)
-            callback(pixels, size.width, size.height)
+            callback(renderOffscreen(left, right, size.width, size.height), size.width, size.height)
         }
 
         previewSurface?.let { surface ->
             egl.makeCurrent(surface)
             val (w, h) = egl.querySize(surface)
-            drawSbs(w, h, flipY = false)
+            compose(left, right, w, h, flipY = false)
             egl.swapBuffers(surface)
         }
 
-        updateStats(skew)
+        egl.makeCurrent(idleSurface)
+        statsFrames++
+        statsMaxSkewNs = maxOf(statsMaxSkewNs, abs(wideFrame.timestamp - mainFrame.timestamp))
+    }
+
+    private fun compose(left: Int, right: Int, width: Int, height: Int, flipY: Boolean) {
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        val half = width / 2
+        GLES20.glViewport(0, 0, half, height)
+        composeProgram.draw(quad, left, flipY)
+        GLES20.glViewport(half, 0, width - half, height)
+        composeProgram.draw(quad, right, flipY)
     }
 
     /** Время кадра камеры (может быть в базе elapsedRealtime) → System.nanoTime(), как ждёт MediaRecorder. */
@@ -258,95 +346,41 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         return pts
     }
 
-    private fun renderOffscreen(width: Int, height: Int): ByteBuffer {
-        val fbo = IntArray(1)
-        val tex = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0,
-            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-            GLES20.GL_TEXTURE_2D, tex[0], 0)
-        check(GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            "Framebuffer не готов"
-        }
-
+    private fun renderOffscreen(left: Int, right: Int, width: Int, height: Int): ByteBuffer {
+        val tex = GlUtil.createTexture2D(width, height)
+        val fbo = GlUtil.createFramebuffer(tex)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         // Рисуем перевёрнутым, чтобы glReadPixels вернул строки сверху вниз
-        drawSbs(width, height, flipY = true)
+        compose(left, right, width, height, flipY = true)
         val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
         GlUtil.checkError("glReadPixels")
-
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        GLES20.glDeleteFramebuffers(1, fbo, 0)
-        GLES20.glDeleteTextures(1, tex, 0)
+        GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
+        GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
         pixels.rewind()
         return pixels
     }
 
-    private fun drawSbs(width: Int, height: Int, flipY: Boolean) {
-        val cal = calibration
-        val wideLeft = rig.wideIsLeft != cal.swapEyes
-        val half = width / 2
-
-        GLES20.glClearColor(0f, 0f, 0f, 1f)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        GLES20.glUseProgram(program)
-        GLES20.glUniform1f(uFlipY, if (flipY) -1f else 1f)
-        GLES20.glUniform1i(uTexture, 0)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-
-        quad.position(0)
-        GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 16, quad)
-        GLES20.glEnableVertexAttribArray(aPosition)
-        quad.position(2)
-        GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 16, quad)
-        GLES20.glEnableVertexAttribArray(aUv)
-
-        GLES20.glViewport(0, 0, half, height)
-        if (wideLeft) drawWide(cal) else drawMain()
-        GLES20.glViewport(half, 0, width - half, height)
-        if (wideLeft) drawMain() else drawWide(cal)
-
-        GLES20.glDisableVertexAttribArray(aPosition)
-        GLES20.glDisableVertexAttribArray(aUv)
-    }
-
-    private fun drawMain() {
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mainTexId)
-        GLES20.glUniformMatrix4fv(uStMatrix, 1, false, mainMatrix, 0)
-        GLES20.glUniform4f(uMap, 1f, 0f, 1f, 0f)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-    }
-
-    /**
-     * Широкоугольный кадр увеличиваем так, чтобы поле зрения совпало с основной камерой,
-     * и совмещаем оптические центры: точка (u, v) основного кадра берётся из
-     * (pw + (u - pm) * s) широкоугольного.
-     */
-    private fun drawWide(cal: Calibration) {
-        val s = 1f / (rig.wideCropFactor * cal.scale)
-        val ou = rig.wide.principalU - rig.main.principalU * s
-        val ov = rig.wide.principalV - rig.main.principalV * s + cal.verticalShift
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, wideTexId)
-        GLES20.glUniformMatrix4fv(uStMatrix, 1, false, wideMatrix, 0)
-        GLES20.glUniform4f(uMap, s, ou, s, ov)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-    }
-
-    private fun updateStats(skewNs: Long) {
+    /** Раз в секунду отправляет статистику. Вызывается на каждом кадре камеры, даже если пар нет. */
+    private fun reportStats() {
         val now = SystemClock.elapsedRealtime()
         if (statsStart == 0L) statsStart = now
-        statsFrames++
-        statsMaxSkewNs = maxOf(statsMaxSkewNs, skewNs)
         val elapsed = now - statsStart
         if (elapsed >= 1000) {
-            listener.onStats(statsFrames * 1000f / elapsed, statsMaxSkewNs / 1_000_000f)
+            listener.onStats(Stats(
+                fps = statsFrames * 1000f / elapsed,
+                maxPairSkewMs = statsMaxSkewNs / 1_000_000f,
+                droppedFrames = statsDropped,
+                wideFrames = statsWideFrames,
+                mainFrames = statsMainFrames,
+            ))
             statsStart = now
             statsFrames = 0
             statsMaxSkewNs = 0
+            statsDropped = 0
+            statsWideFrames = 0
+            statsMainFrames = 0
         }
     }
 
@@ -370,26 +404,26 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         error?.let { throw it }
     }
 
-    companion object {
-        private const val TAG = "StereoRenderer"
+    // ---------- Шейдеры ----------
 
-        private const val VERTEX_SHADER = """
+    /** Рисует кадр камеры (OES-текстура) с кропом в портретных координатах. */
+    private class CameraProgram {
+        private val program = GlUtil.createProgram(
+            """
             attribute vec4 aPosition;
             attribute vec2 aUv;
             uniform mat4 uStMatrix;
             uniform vec4 uMap;
-            uniform float uFlipY;
             varying vec2 vTex;
             void main() {
-                gl_Position = vec4(aPosition.x, aPosition.y * uFlipY, 0.0, 1.0);
+                gl_Position = aPosition;
                 // Координаты в портретном кадре камеры (v вниз) с учётом кропа и сдвига
                 vec2 p = vec2(uMap.x * aUv.x + uMap.y, uMap.z * aUv.y + uMap.w);
                 // Матрица SurfaceTexture уже учитывает поворот сенсора и ждёт t снизу вверх
                 vTex = (uStMatrix * vec4(p.x, 1.0 - p.y, 0.0, 1.0)).xy;
             }
-        """
-
-        private const val FRAGMENT_SHADER = """
+            """,
+            """
             #extension GL_OES_EGL_image_external : require
             precision highp float;
             varying vec2 vTex;
@@ -397,6 +431,82 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             void main() {
                 gl_FragColor = texture2D(uTexture, vTex);
             }
-        """
+            """
+        )
+        private val aPosition = GLES20.glGetAttribLocation(program, "aPosition")
+        private val aUv = GLES20.glGetAttribLocation(program, "aUv")
+        private val uStMatrix = GLES20.glGetUniformLocation(program, "uStMatrix")
+        private val uMap = GLES20.glGetUniformLocation(program, "uMap")
+        private val uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+
+        fun draw(quad: FloatBuffer, texture: Int, stMatrix: FloatArray, su: Float, ou: Float, sv: Float, ov: Float) {
+            GLES20.glUseProgram(program)
+            bindQuad(quad, aPosition, aUv)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)
+            GLES20.glUniform1i(uTexture, 0)
+            GLES20.glUniformMatrix4fv(uStMatrix, 1, false, stMatrix, 0)
+            GLES20.glUniform4f(uMap, su, ou, sv, ov)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+
+        fun release() = GLES20.glDeleteProgram(program)
+    }
+
+    /** Рисует готовую текстуру глаза в половину кадра. */
+    private class ComposeProgram {
+        private val program = GlUtil.createProgram(
+            """
+            attribute vec4 aPosition;
+            attribute vec2 aUv;
+            uniform float uFlipY;
+            varying vec2 vTex;
+            void main() {
+                gl_Position = vec4(aPosition.x, aPosition.y * uFlipY, 0.0, 1.0);
+                vTex = vec2(aUv.x, 1.0 - aUv.y);
+            }
+            """,
+            """
+            precision highp float;
+            varying vec2 vTex;
+            uniform sampler2D uTexture;
+            void main() {
+                gl_FragColor = texture2D(uTexture, vTex);
+            }
+            """
+        )
+        private val aPosition = GLES20.glGetAttribLocation(program, "aPosition")
+        private val aUv = GLES20.glGetAttribLocation(program, "aUv")
+        private val uFlipY = GLES20.glGetUniformLocation(program, "uFlipY")
+        private val uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+
+        fun draw(quad: FloatBuffer, texture: Int, flipY: Boolean) {
+            GLES20.glUseProgram(program)
+            bindQuad(quad, aPosition, aUv)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            GLES20.glUniform1i(uTexture, 0)
+            GLES20.glUniform1f(uFlipY, if (flipY) -1f else 1f)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+
+        fun release() = GLES20.glDeleteProgram(program)
+    }
+
+    companion object {
+        private const val TAG = "StereoRenderer"
+        /** Кадры с разницей меньше половины кадра при 30 fps считаем одной парой. */
+        private const val PAIR_TOLERANCE_NS = 15_000_000L
+        /** Сколько обрезанных кадров каждой камеры можно держать в ожидании пары (~130 мс). */
+        private const val RING_SIZE = 5
+
+        private fun bindQuad(quad: FloatBuffer, aPosition: Int, aUv: Int) {
+            quad.position(0)
+            GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 16, quad)
+            GLES20.glEnableVertexAttribArray(aPosition)
+            quad.position(2)
+            GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 16, quad)
+            GLES20.glEnableVertexAttribArray(aUv)
+        }
     }
 }

@@ -24,6 +24,9 @@ class StereoCamera(
     private val manager: CameraManager,
     private val rig: StereoRig,
     private val listener: Listener,
+    private val mode: CaptureMode,
+    /** Принудительный размер потока широкоугольной камеры (для замеров). */
+    private val wideSizeOverride: Size? = null,
 ) {
     interface Listener {
         /** Вызывается на потоке камеры. Нужно вернуть поверхности для широкоугольной и основной камер. */
@@ -54,7 +57,7 @@ class StereoCamera(
                             return
                         }
                         device = camera
-                        startSession(camera, rig.streamSizeCandidates())
+                        startSession(camera, rig.streamSizeCandidates(mode, wideSizeOverride))
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {

@@ -15,6 +15,8 @@ import kotlin.math.abs
  * Широкоугольная камера всегда кропается до поля зрения основной,
  * поэтому её поток берём с большим разрешением, чем у основной.
  */
+enum class CaptureMode { PHOTO, VIDEO }
+
 data class StereoRig(
     val logicalId: String,
     val wide: PhysicalCamera,
@@ -43,20 +45,28 @@ data class StereoRig(
     /** Во сколько раз широкоугольный кадр нужно увеличить, чтобы совпасть с основным. */
     val wideCropFactor: Float get() = main.normFocal / wide.normFocal
 
-    /** Пара размеров потоков (широкоугольная, основная), от лучшей к худшей. */
-    fun streamSizeCandidates(): List<Pair<Size, Size>> {
-        val result = mutableListOf<Pair<Size, Size>>()
+    /**
+     * Пары размеров потоков (широкоугольная, основная), от лучшей к худшей.
+     *
+     * Широкоугольный кадр кропается примерно вдвое, поэтому для полной резкости левого глаза
+     * её поток должен быть вдвое больше основного. Но камера Pixel 9 на таком потоке
+     * выдаёт только ~25 fps, поэтому для видео берём одинаковые потоки и честные 30 fps.
+     */
+    fun streamSizeCandidates(mode: CaptureMode, wideOverride: Size? = null): List<Pair<Size, Size>> {
         val mainSizes = PREFERRED_MAIN_SIZES.filter { it in main.outputSizes }
         val wide43 = wide.outputSizes.filter { isFourByThree(it) }.sortedBy { it.width }
-        for (mainSize in mainSizes) {
+        val sharp = mainSizes.mapNotNull { mainSize ->
             val needWidth = mainSize.width * wideCropFactor
-            val wideSize = wide43.firstOrNull { it.width >= needWidth } ?: wide43.lastOrNull() ?: continue
-            result += wideSize to mainSize
+            val wideSize = wide43.firstOrNull { it.width >= needWidth } ?: wide43.lastOrNull()
+            wideSize?.let { it to mainSize }
         }
-        // Запасной вариант: одинаковые потоки (картинка с широкоугольной будет мягче)
-        for (mainSize in mainSizes) {
-            if (mainSize in wide.outputSizes) result += mainSize to mainSize
+        val fast = mainSizes.filter { it in wide.outputSizes }.map { it to it }
+
+        val result = mutableListOf<Pair<Size, Size>>()
+        if (wideOverride != null && wideOverride in wide.outputSizes && mainSizes.isNotEmpty()) {
+            result += wideOverride to mainSizes.first()
         }
+        result += if (mode == CaptureMode.PHOTO) sharp + fast else fast + sharp
         return result.distinct()
     }
 

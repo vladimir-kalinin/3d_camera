@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -24,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
+import com.example.my_3d_camera.camera.CaptureMode
 import com.example.my_3d_camera.camera.StereoCamera
 import com.example.my_3d_camera.camera.StereoRig
 import com.example.my_3d_camera.databinding.ActivityMainBinding
@@ -48,10 +50,17 @@ class MainActivity : AppCompatActivity() {
     private var previewSurface: Surface? = null
 
     private var calibration = StereoRenderer.Calibration()
+    private var mode = CaptureMode.VIDEO
     private var isRecording = false
     private var recordingStartedAt = 0L
     private var streamInfo = ""
     private var permissionAsked = false
+    private var cameraStalled = false
+    private var thermalStatus = PowerManager.THERMAL_STATUS_NONE
+    private val thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
+        thermalStatus = status
+        updateWarning()
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -72,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         saver = MediaSaver(this)
         videoRecorder = SbsVideoRecorder(this, saver)
         calibration = loadCalibration()
+        mode = loadMode()
 
         rig = try {
             StereoRig.detect(getSystemService(CameraManager::class.java))
@@ -81,19 +91,23 @@ class MainActivity : AppCompatActivity() {
         }
         if (rig == null) {
             binding.statusText.text = "Не найдена пара задних камер, работающих одновременно"
-            binding.recordButton.isEnabled = false
-            binding.photoButton.isEnabled = false
+            binding.shutterButton.isEnabled = false
         }
 
         binding.preview.surfaceTextureListener = previewListener
-        binding.recordButton.setOnClickListener { toggleRecording() }
-        binding.photoButton.setOnClickListener { takePhoto() }
+        binding.shutterButton.setOnClickListener {
+            if (mode == CaptureMode.PHOTO) takePhoto() else toggleRecording()
+        }
+        binding.photoModeButton.setOnClickListener { switchMode(CaptureMode.PHOTO) }
+        binding.videoModeButton.setOnClickListener { switchMode(CaptureMode.VIDEO) }
+        updateShutterUi()
         binding.menuButton.setOnClickListener { showMenu() }
         setupCalibrationControls()
     }
 
     override fun onResume() {
         super.onResume()
+        getSystemService(PowerManager::class.java).addThermalStatusListener(mainExecutor, thermalListener)
         if (rig == null) return
         if (hasPermission(Manifest.permission.CAMERA)) {
             startCamera()
@@ -108,6 +122,7 @@ class MainActivity : AppCompatActivity() {
         // Камеру обязательно освобождаем, иначе её не смогут открыть другие приложения
         if (isRecording) stopRecording(wait = true)
         stopCamera()
+        getSystemService(PowerManager::class.java).removeThermalStatusListener(thermalListener)
         super.onPause()
     }
 
@@ -125,11 +140,14 @@ class MainActivity : AppCompatActivity() {
         if (camera != null) return
 
         val renderer = StereoRenderer(rig, object : StereoRenderer.Listener {
-            override fun onStats(fps: Float, maxPairSkewMs: Float) {
+            override fun onStats(stats: StereoRenderer.Stats) {
                 runOnUiThread {
                     binding.statusText.text = String.format(
-                        Locale.US, "%s · %.0f fps · рассинхрон %.1f мс", streamInfo, fps, maxPairSkewMs
+                        Locale.US, "%s · %.0f fps · рассинхрон %.1f мс · без пары %d",
+                        streamInfo, stats.fps, stats.maxPairSkewMs, stats.droppedFrames
                     )
+                    cameraStalled = stats.cameraStalled
+                    updateWarning()
                 }
             }
         })
@@ -147,7 +165,7 @@ class MainActivity : AppCompatActivity() {
             override fun onStarted(wideSize: Size, mainSize: Size) {
                 val out = renderer.outputSize
                 runOnUiThread {
-                    streamInfo = "SBS ${out.width}×${out.height}"
+                    streamInfo = "SBS ${out.width}×${out.height} (ш/у ${wideSize.width}×${wideSize.height})"
                     binding.statusText.text = streamInfo
                     (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio =
                         "${out.width}:${out.height}"
@@ -158,7 +176,59 @@ class MainActivity : AppCompatActivity() {
             override fun onError(message: String) {
                 runOnUiThread { Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show() }
             }
-        }).also { it.open() }
+        }, mode, wideSizeOverride()).also { it.open() }
+    }
+
+    /** Отладочный запуск: adb shell am start ... --es wide_size 2048x1536 */
+    private fun wideSizeOverride(): Size? {
+        if (!BuildConfig.DEBUG) return null
+        val value = intent.getStringExtra("wide_size") ?: return null
+        return runCatching { Size.parseSize(value) }.getOrNull()
+    }
+
+    /**
+     * В режиме фото широкоугольная камера отдаёт большой поток (резкий левый глаз, ~25 fps),
+     * в режиме видео — такой же, как основная (30 fps). Смена режима перезапускает камеру.
+     */
+    private fun switchMode(newMode: CaptureMode) {
+        if (newMode == mode || isRecording) return
+        mode = newMode
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_MODE, mode.name).apply()
+        updateShutterUi()
+        if (camera != null) {
+            stopCamera()
+            startCamera()
+        }
+    }
+
+    private fun loadMode(): CaptureMode {
+        val name = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(KEY_MODE, null)
+        return CaptureMode.entries.firstOrNull { it.name == name } ?: CaptureMode.VIDEO
+    }
+
+    private fun updateShutterUi() {
+        val icon = when {
+            isRecording -> R.drawable.ic_stop
+            mode == CaptureMode.PHOTO -> R.drawable.ic_photo
+            else -> R.drawable.ic_record
+        }
+        binding.shutterButton.setImageResource(icon)
+        binding.shutterButton.contentDescription = getString(
+            when {
+                isRecording -> R.string.stop_video
+                mode == CaptureMode.PHOTO -> R.string.take_photo
+                else -> R.string.record_video
+            }
+        )
+        for ((button, buttonMode) in listOf(
+            binding.photoModeButton to CaptureMode.PHOTO,
+            binding.videoModeButton to CaptureMode.VIDEO,
+        )) {
+            val selected = buttonMode == mode
+            button.setTextColor(if (selected) 0xFFFFD54F.toInt() else 0xB3FFFFFF.toInt())
+            button.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            button.isEnabled = !isRecording
+        }
     }
 
     private fun stopCamera() {
@@ -188,11 +258,26 @@ class MainActivity : AppCompatActivity() {
         override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
     }
 
+    /**
+     * При нагреве Android сначала снижает частоту кадров камер,
+     * а потом может совсем отключить одну из физических камер.
+     */
+    private fun updateWarning() {
+        val text = when {
+            cameraStalled -> "Одна из камер перестала отдавать кадры. Обычно это перегрев — дайте телефону остыть"
+            thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> "Телефон перегрелся: Android снижает частоту кадров камер"
+            thermalStatus >= PowerManager.THERMAL_STATUS_LIGHT -> "Телефон нагревается — возможны пропуски кадров"
+            else -> null
+        }
+        binding.warningText.text = text
+        binding.warningText.visibility = if (text != null) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
     // ---------- Фото ----------
 
     private fun takePhoto() {
         val renderer = renderer ?: return
-        binding.photoButton.isEnabled = false
+        binding.shutterButton.isEnabled = false
         binding.preview.animate().alpha(0.3f).setDuration(60).withEndAction {
             binding.preview.animate().alpha(1f).setDuration(120)
         }
@@ -200,7 +285,7 @@ class MainActivity : AppCompatActivity() {
             io.execute {
                 val uri = saver.savePhoto(pixels, width, height)
                 runOnUiThread {
-                    binding.photoButton.isEnabled = true
+                    binding.shutterButton.isEnabled = true
                     val text = if (uri != null) "Фото сохранено (${width}×${height})" else "Не удалось сохранить фото"
                     Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
                 }
@@ -221,7 +306,7 @@ class MainActivity : AppCompatActivity() {
         val withAudio = hasPermission(Manifest.permission.RECORD_AUDIO)
         val frameRate = rig?.fpsRange?.upper ?: 30
 
-        binding.recordButton.isEnabled = false
+        binding.shutterButton.isEnabled = false
         io.execute {
             try {
                 val surface = videoRecorder.start(size, frameRate, withAudio)
@@ -230,12 +315,12 @@ class MainActivity : AppCompatActivity() {
                     isRecording = true
                     recordingStartedAt = SystemClock.elapsedRealtime()
                     updateRecordingUi()
-                    binding.recordButton.isEnabled = true
+                    binding.shutterButton.isEnabled = true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Не удалось начать запись", e)
                 runOnUiThread {
-                    binding.recordButton.isEnabled = true
+                    binding.shutterButton.isEnabled = true
                     Toast.makeText(this, "Не удалось начать запись: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -246,13 +331,13 @@ class MainActivity : AppCompatActivity() {
         val renderer = renderer
         isRecording = false
         updateRecordingUi()
-        binding.recordButton.isEnabled = false
+        binding.shutterButton.isEnabled = false
         val task = io.submit {
             // Рендерер перестаёт рисовать в поверхность энкодера до остановки MediaRecorder
             renderer?.stopRecording()
             val uri = videoRecorder.stop()
             runOnUiThread {
-                binding.recordButton.isEnabled = true
+                binding.shutterButton.isEnabled = true
                 val text = if (uri != null) "Видео сохранено в галерею" else "Видео не записалось"
                 Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
             }
@@ -261,8 +346,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateRecordingUi() {
-        binding.recordButton.setImageResource(if (isRecording) R.drawable.ic_stop else R.drawable.ic_record)
-        binding.recordButton.contentDescription = getString(if (isRecording) R.string.stop_video else R.string.record_video)
+        updateShutterUi()
         binding.recordingIndicator.visibility = if (isRecording) android.view.View.VISIBLE else android.view.View.GONE
         mainHandler.removeCallbacks(recordingTicker)
         if (isRecording) recordingTicker.run()
@@ -400,5 +484,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SCALE = "scale"
         private const val KEY_VERTICAL = "vertical_shift"
         private const val KEY_SWAP = "swap_eyes"
+        private const val KEY_MODE = "capture_mode"
     }
 }

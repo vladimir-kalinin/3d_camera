@@ -4,6 +4,8 @@
     <string name="record_video">Записать видео</string>
     <string name="stop_video">Остановить запись</string>
     <string name="take_photo">Сделать фото</string>
+    <string name="mode_photo">Фото</string>
+    <string name="mode_video">Видео</string>
     <string name="calibration_scale">Масштаб широкоугольной</string>
     <string name="calibration_vertical">Сдвиг по вертикали</string>
     <string name="swap_eyes">Поменять глаза местами</string>

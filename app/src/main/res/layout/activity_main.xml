@@ -52,6 +52,20 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/preview" />
 
+    <TextView
+        android:id="@+id/warningText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="4dp"
+        android:gravity="center"
+        android:textColor="#FFFFB74D"
+        android:textSize="13sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/statusText" />
+
     <LinearLayout
         android:id="@+id/calibrationPanel"
         android:layout_width="0dp"
@@ -61,7 +75,7 @@
         android:paddingHorizontal="16dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusText">
+        app:layout_constraintTop_toBottomOf="@id/warningText">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -115,6 +129,39 @@
             android:max="200" />
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/modeSwitch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toTopOf="@id/shutterButton"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:id="@+id/photoModeButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="@string/mode_photo"
+            android:textAllCaps="true"
+            android:textColor="@color/white" />
+
+        <TextView
+            android:id="@+id/videoModeButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="@string/mode_video"
+            android:textAllCaps="true"
+            android:textColor="@color/white" />
+    </LinearLayout>
+
     <ImageButton
         android:id="@+id/menuButton"
         android:layout_width="56dp"
@@ -122,14 +169,13 @@
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/menu"
         android:src="@drawable/ic_more"
-        app:layout_constraintBottom_toBottomOf="@id/recordButton"
-        app:layout_constraintEnd_toStartOf="@id/recordButton"
-        app:layout_constraintHorizontal_chainStyle="spread"
+        app:layout_constraintBottom_toBottomOf="@id/shutterButton"
+        app:layout_constraintEnd_toStartOf="@id/shutterButton"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/recordButton" />
+        app:layout_constraintTop_toTopOf="@id/shutterButton" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/recordButton"
+        android:id="@+id/shutterButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="48dp"
@@ -139,19 +185,7 @@
         app:fabCustomSize="72dp"
         app:maxImageSize="40dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toStartOf="@id/photoButton"
-        app:layout_constraintStart_toEndOf="@id/menuButton" />
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/photoButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:contentDescription="@string/take_photo"
-        android:src="@drawable/ic_photo"
-        app:backgroundTint="@color/white"
-        app:layout_constraintBottom_toBottomOf="@id/recordButton"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/recordButton"
-        app:layout_constraintTop_toTopOf="@id/recordButton" />
+        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
