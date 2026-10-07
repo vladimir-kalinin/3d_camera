@@ -23,6 +23,10 @@ android {
             applicationIdSuffix = ".dev"
         }
         release {
+            // Отдельный id: у старой версии com.example.my_3d_camera другой ключ подписи
+            applicationIdSuffix = ".release"
+            // Для личного использования подписываем debug-ключом; для Google Play нужен свой ключ
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
