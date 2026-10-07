@@ -110,8 +110,8 @@ class MainActivity : AppCompatActivity() {
             if (isChecked) switchMode(if (id == R.id.photoModeButton) CaptureMode.PHOTO else CaptureMode.VIDEO)
         }
         binding.galleryButton.setOnClickListener { openLastMedia() }
-        binding.swapEyesButton.isChecked = calibration.swapEyes
-        binding.swapEyesButton.setOnClickListener { toggleSwapEyes() }
+        binding.swapEyesSwitch.isChecked = calibration.swapEyes
+        binding.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
         binding.aboutButton.setOnClickListener { showAbout() }
         binding.calibrationButton.setOnClickListener { toggleCalibrationPanel() }
         binding.resetCalibrationButton.setOnClickListener { resetCalibration() }
@@ -535,6 +535,8 @@ class MainActivity : AppCompatActivity() {
             for (view in listOf(binding.preview, binding.eyeDivider, binding.recordingIndicator, binding.warningText)) {
                 view.animate().translationY(shift).setDuration(200)
             }
+            // Поднятое превью наезжает на карточку статуса — прячем её, пока открыта подстройка
+            binding.statusPanel.animate().alpha(if (show) 0f else 1f).setDuration(200)
         }
     }
 
@@ -546,9 +548,9 @@ class MainActivity : AppCompatActivity() {
         saveCalibration()
     }
 
-    private fun toggleSwapEyes() {
-        calibration = calibration.copy(swapEyes = !calibration.swapEyes)
-        binding.swapEyesButton.isChecked = calibration.swapEyes
+    private fun setSwapEyes(swap: Boolean) {
+        if (swap == calibration.swapEyes) return
+        calibration = calibration.copy(swapEyes = swap)
         applyCalibration()
         saveCalibration()
     }

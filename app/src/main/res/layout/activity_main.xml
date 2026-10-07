@@ -206,10 +206,20 @@
                 android:valueTo="200"
                 app:labelBehavior="gone"
                 app:tickVisible="false" />
+
+            <!-- Нужно один раз, если камеры стоят иначе, чем сообщает HAL -->
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swapEyesSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/swap_eyes"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Ряд спуска: последний снимок · спуск · поменять глаза -->
+    <!-- Ряд спуска: последний снимок · спуск -->
     <com.google.android.material.imageview.ShapeableImageView
         android:id="@+id/galleryButton"
         android:layout_width="60dp"
@@ -239,20 +249,6 @@
         app:layout_constraintBottom_toTopOf="@id/modeSwitch"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/swapEyesButton"
-        style="@style/Widget.My3DCamera.ToggleIconButton"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
-        android:contentDescription="@string/swap_eyes"
-        app:icon="@drawable/ic_swap_eyes"
-        app:iconSize="28dp"
-        app:layout_constraintBottom_toBottomOf="@id/shutterButton"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@id/shutterButton"
-        app:layout_constraintTop_toTopOf="@id/shutterButton"
-        app:shapeAppearance="?attr/shapeAppearanceCornerLarge" />
 
     <!-- Нижний ряд: о камерах · фото/видео · подстройка -->
     <com.google.android.material.button.MaterialButton
