@@ -135,6 +135,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
 
     @Volatile var calibration = Calibration()
 
+    /** Превью: глаза наложены друг на друга полупрозрачно (как у обычной камеры) вместо SBS. */
+    @Volatile var overlayPreview = false
+
     /** Размер итогового кадра SBS (ширина обоих глаз вместе). */
     @Volatile var outputSize = Size(0, 0)
         private set
@@ -343,7 +346,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         previewSurface?.let { surface ->
             egl.makeCurrent(surface)
             val (w, h) = egl.querySize(surface)
-            compose(left, right, w, h, flipY = false)
+            if (overlayPreview) overlay(left, right, w, h) else compose(left, right, w, h, flipY = false)
             egl.swapBuffers(surface)
         }
 
@@ -399,6 +402,17 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         composeProgram.draw(quad, left, flipY)
         GLES20.glViewport(half, 0, width - half, height)
         composeProgram.draw(quad, right, flipY)
+    }
+
+    /** Правый глаз поверх левого с прозрачностью 50%. */
+    private fun overlay(left: Int, right: Int, width: Int, height: Int) {
+        GLES20.glViewport(0, 0, width, height)
+        composeProgram.draw(quad, left, flipY = false)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendColor(0f, 0f, 0f, OVERLAY_ALPHA)
+        GLES20.glBlendFunc(GLES20.GL_CONSTANT_ALPHA, GLES20.GL_ONE_MINUS_CONSTANT_ALPHA)
+        composeProgram.draw(quad, right, flipY = false)
+        GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     /** Время кадра камеры (может быть в базе elapsedRealtime) → System.nanoTime(), как ждёт MediaRecorder. */
@@ -583,6 +597,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         private val MIN_GAMMA_GAIN = ColorMatch.MIN_GAIN.pow(1f / 2.2f)
         private val MAX_GAMMA_GAIN = ColorMatch.MAX_GAIN.pow(1f / 2.2f)
         private val NO_GAIN = floatArrayOf(1f, 1f, 1f)
+        private const val OVERLAY_ALPHA = 0.5f
 
         private fun bindQuad(quad: FloatBuffer, aPosition: Int, aUv: Int) {
             quad.position(0)

@@ -10,6 +10,9 @@
     <string name="calibration_scale">Wide camera scale</string>
     <string name="calibration_vertical">Vertical shift</string>
     <string name="swap_eyes">Swap eyes</string>
+    <string name="overlay_preview">Overlay preview</string>
+    <string name="show_stream_info">Show stream info</string>
+    <string name="settings">Settings</string>
     <string name="reset_calibration">Reset</string>
     <string name="about">About cameras</string>
     <string name="video_settings">Video settings</string>

@@ -33,6 +33,7 @@ import com.example.my_3d_camera.camera.VideoFormat
 import com.example.my_3d_camera.camera.StereoCamera
 import com.example.my_3d_camera.camera.StereoRig
 import com.example.my_3d_camera.databinding.ActivityMainBinding
+import com.example.my_3d_camera.databinding.SheetSettingsBinding
 import com.example.my_3d_camera.databinding.SheetVideoSettingsBinding
 import com.example.my_3d_camera.gl.StereoRenderer
 import com.example.my_3d_camera.media.MediaSaver
@@ -56,11 +57,15 @@ class MainActivity : AppCompatActivity() {
     private var previewSurface: Surface? = null
 
     private var calibration = StereoRenderer.Calibration()
+    private var overlayPreview = true
+    private var showStreamInfo = true
     private var mode = CaptureMode.VIDEO
     private var videoFormat = VideoFormat()
     /** Открытая панель настроек видео: обновляется при смене формата. */
     private var videoSettings: SheetVideoSettingsBinding? = null
     private var videoSettingsDialog: BottomSheetDialog? = null
+    private var settings: SheetSettingsBinding? = null
+    private var settingsDialog: BottomSheetDialog? = null
     /** Частота кадров, с которой камера фактически работает (для энкодера). */
     private var streamFrameRate = 30
     /** Камера настроена на полноразмерные JPEG (режим фото). */
@@ -122,12 +127,12 @@ class MainActivity : AppCompatActivity() {
         }
         binding.videoSettingsButton.setOnClickListener { showVideoSettings() }
         binding.galleryButton.setOnClickListener { openLastMedia() }
-        binding.swapEyesSwitch.isChecked = calibration.swapEyes
-        binding.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).let {
+            overlayPreview = it.getBoolean(KEY_OVERLAY, true)
+            showStreamInfo = it.getBoolean(KEY_STREAM_INFO, true)
+        }
         binding.aboutButton.setOnClickListener { showAbout() }
-        binding.calibrationButton.setOnClickListener { toggleCalibrationPanel() }
-        binding.resetCalibrationButton.setOnClickListener { resetCalibration() }
-        setupCalibrationControls()
+        binding.calibrationButton.setOnClickListener { showSettings() }
         io.execute {
             saver.moveToCommonFolder()
             saver.latestMedia()?.let { showLastMedia(it) }
@@ -151,6 +156,7 @@ class MainActivity : AppCompatActivity() {
         // Камеру обязательно освобождаем, иначе её не смогут открыть другие приложения
         if (isRecording) stopRecording(wait = true)
         videoSettingsDialog?.dismiss()
+        settingsDialog?.dismiss()
         stopCamera()
         getSystemService(PowerManager::class.java).removeThermalStatusListener(thermalListener)
         super.onPause()
@@ -185,7 +191,9 @@ class MainActivity : AppCompatActivity() {
     private fun showStatus(rows: List<Pair<String, String>>) {
         binding.statusLabels.text = rows.joinToString("\n") { it.first }
         binding.statusValues.text = rows.joinToString("\n") { it.second }
-        binding.statusPanel.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+        // Ошибку поиска камер показываем всегда, параметры потока — если включены в настройках
+        val show = rows.isNotEmpty() && (showStreamInfo || rig == null)
+        binding.statusPanel.visibility = if (show) View.VISIBLE else View.GONE
     }
 
     private fun startCamera() {
@@ -206,6 +214,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
         renderer.calibration = calibration
+        renderer.overlayPreview = overlayPreview
         val (wideSurface, mainSurface) = renderer.start()
         this.renderer = renderer
         previewSurface?.let { renderer.setPreviewSurface(it) }
@@ -228,9 +237,7 @@ class MainActivity : AppCompatActivity() {
                         listOf("SBS" to "${out.width}×${out.height}")
                     } + ("Wide stream" to "${wideSize.width}×${wideSize.height}")
                     showStatus(streamRows)
-                    (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio =
-                        "${out.width}:${out.height}"
-                    binding.preview.requestLayout()
+                    updatePreviewLayout()
                 }
             }
 
@@ -551,18 +558,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- Подстройка совмещения ----------
+    // ---------- Настройки: подстройка совмещения и превью ----------
 
-    private fun setupCalibrationControls() {
-        binding.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
-        binding.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
-        updateCalibrationLabels()
-
+    /** Шторка «Настройки» по образцу панели видео; превью под ней не затемняется, чтобы видеть совмещение. */
+    private fun showSettings() {
+        if (settingsDialog != null) return
+        val sheet = SheetSettingsBinding.inflate(layoutInflater)
+        sheet.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
+        sheet.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
         val changeListener = Slider.OnChangeListener { _, _, fromUser ->
             if (!fromUser) return@OnChangeListener
             calibration = calibration.copy(
-                scale = progressToScale(binding.scaleSlider.value.toInt()),
-                verticalShift = progressToShift(binding.verticalSlider.value.toInt()),
+                scale = progressToScale(sheet.scaleSlider.value.toInt()),
+                verticalShift = progressToShift(sheet.verticalSlider.value.toInt()),
             )
             applyCalibration()
         }
@@ -570,10 +578,31 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(slider: Slider) = Unit
             override fun onStopTrackingTouch(slider: Slider) = saveCalibration()
         }
-        for (slider in listOf(binding.scaleSlider, binding.verticalSlider)) {
+        for (slider in listOf(sheet.scaleSlider, sheet.verticalSlider)) {
             slider.addOnChangeListener(changeListener)
             slider.addOnSliderTouchListener(touchListener)
         }
+        sheet.resetCalibrationButton.setOnClickListener { resetCalibration() }
+        sheet.swapEyesSwitch.isChecked = calibration.swapEyes
+        sheet.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
+        sheet.overlaySwitch.isChecked = overlayPreview
+        sheet.overlaySwitch.setOnCheckedChangeListener { _, isChecked -> setOverlayPreview(isChecked) }
+        sheet.streamInfoSwitch.isChecked = showStreamInfo
+        sheet.streamInfoSwitch.setOnCheckedChangeListener { _, isChecked -> setShowStreamInfo(isChecked) }
+
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        dialog.window?.setDimAmount(0f)
+        dialog.setOnDismissListener {
+            settings = null
+            settingsDialog = null
+            binding.calibrationButton.isChecked = false
+        }
+        settings = sheet
+        settingsDialog = dialog
+        updateCalibrationLabels()
+        binding.calibrationButton.isChecked = true
+        dialog.show()
     }
 
     private fun applyCalibration() {
@@ -582,9 +611,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateCalibrationLabels() {
+        val sheet = settings ?: return
         val total = (rig?.wideCropFactor ?: 1f) * calibration.scale
-        binding.scaleValue.text = String.format(Locale.US, "%.3f× (total %.3f×)", calibration.scale, total)
-        binding.verticalValue.text = String.format(Locale.US, "%+.1f%%", calibration.verticalShift * 100)
+        sheet.scaleValue.text = String.format(Locale.US, "%.3f× (total %.3f×)", calibration.scale, total)
+        sheet.verticalValue.text = String.format(Locale.US, "%+.1f%%", calibration.verticalShift * 100)
     }
 
     // Масштаб: 0.90..1.10, сдвиг: −5%..+5% высоты кадра; середина ползунка — без подстройки
@@ -610,28 +640,39 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    private fun toggleCalibrationPanel() {
-        val show = binding.calibrationPanel.visibility != View.VISIBLE
-        binding.calibrationPanel.visibility = if (show) View.VISIBLE else View.GONE
-        binding.calibrationButton.isChecked = show
-        // Превью стоит по центру экрана, карточка перекрыла бы его низ — поднимаем превью над ней
-        binding.calibrationPanel.post {
-            val overlap = if (show) binding.preview.bottom - binding.calibrationPanel.top + PANEL_GAP_PX else 0
-            val shift = -overlap.coerceAtLeast(0).toFloat()
-            for (view in listOf(binding.preview, binding.eyeDivider, binding.recordingIndicator, binding.warningText)) {
-                view.animate().translationY(shift).setDuration(200)
-            }
-            // Поднятое превью наезжает на карточку статуса — прячем её, пока открыта подстройка
-            binding.statusPanel.animate().alpha(if (show) 0f else 1f).setDuration(200)
-        }
-    }
-
     private fun resetCalibration() {
         calibration = StereoRenderer.Calibration(swapEyes = calibration.swapEyes)
-        binding.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
-        binding.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
+        settings?.let {
+            it.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
+            it.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
+        }
         applyCalibration()
         saveCalibration()
+    }
+
+    private fun setOverlayPreview(overlay: Boolean) {
+        if (overlay == overlayPreview) return
+        overlayPreview = overlay
+        renderer?.overlayPreview = overlay
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_OVERLAY, overlay).apply()
+        updatePreviewLayout()
+    }
+
+    private fun setShowStreamInfo(show: Boolean) {
+        if (show == showStreamInfo) return
+        showStreamInfo = show
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_STREAM_INFO, show).apply()
+        showStatus(streamRows)
+    }
+
+    /** Пропорции превью: в режиме наложения — один глаз, иначе весь кадр SBS. */
+    private fun updatePreviewLayout() {
+        val out = renderer?.outputSize ?: return
+        if (out.width == 0) return
+        val width = if (overlayPreview) out.width / 2 else out.width
+        (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio = "$width:${out.height}"
+        binding.preview.requestLayout()
+        binding.eyeDivider.visibility = if (overlayPreview) View.GONE else View.VISIBLE
     }
 
     private fun setSwapEyes(swap: Boolean) {
@@ -682,9 +723,10 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SCALE = "scale"
         private const val KEY_VERTICAL = "vertical_shift"
         private const val KEY_SWAP = "swap_eyes"
+        private const val KEY_OVERLAY = "overlay_preview"
+        private const val KEY_STREAM_INFO = "show_stream_info"
         private const val KEY_MODE = "capture_mode"
         private const val KEY_VIDEO_ASPECT = "video_aspect"
         private const val KEY_VIDEO_FPS = "video_fps"
-        private const val PANEL_GAP_PX = 32
     }
 }
