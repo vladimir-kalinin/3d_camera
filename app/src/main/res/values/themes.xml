@@ -26,6 +26,65 @@
         <item name="iconPadding">0dp</item>
     </style>
 
+    <!-- Панель «Настройки видео» в стиле Google Камеры -->
+    <style name="Widget.My3DCamera.SheetRow" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingVertical">14dp</item>
+    </style>
+
+    <style name="Widget.My3DCamera.SheetRowText" parent="">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingStart">8dp</item>
+    </style>
+
+    <style name="Widget.My3DCamera.SheetRowLabel" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyMedium</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="Widget.My3DCamera.SheetRowValue" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceTitleMedium</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+    </style>
+
+    <!-- Вариант настройки: квадратная кнопка, выбранная закрашена акцентным цветом -->
+    <style name="Widget.My3DCamera.SheetOption" parent="Widget.Material3.Button">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:checkable">true</item>
+        <item name="android:padding">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="backgroundTint">@color/sheet_option_bg</item>
+        <item name="android:textColor">@color/sheet_option_text</item>
+        <item name="cornerRadius">14dp</item>
+    </style>
+
+    <!-- Кнопка рядом со спуском: текущий формат видео, открывает панель настроек -->
+    <style name="Widget.My3DCamera.FormatButton" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:padding">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingExtra">0dp</item>
+        <item name="cornerRadius">16dp</item>
+    </style>
+
     <style name="ShapeAppearance.My3DCamera.Thumbnail" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSize">16dp</item>

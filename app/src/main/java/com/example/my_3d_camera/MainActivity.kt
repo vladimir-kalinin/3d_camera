@@ -24,12 +24,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
 import com.example.my_3d_camera.camera.CaptureMode
+import com.example.my_3d_camera.camera.VideoAspect
+import com.example.my_3d_camera.camera.VideoFormat
 import com.example.my_3d_camera.camera.StereoCamera
 import com.example.my_3d_camera.camera.StereoRig
 import com.example.my_3d_camera.databinding.ActivityMainBinding
+import com.example.my_3d_camera.databinding.SheetVideoSettingsBinding
 import com.example.my_3d_camera.gl.StereoRenderer
 import com.example.my_3d_camera.media.MediaSaver
 import com.example.my_3d_camera.media.SbsVideoRecorder
@@ -53,6 +57,12 @@ class MainActivity : AppCompatActivity() {
 
     private var calibration = StereoRenderer.Calibration()
     private var mode = CaptureMode.VIDEO
+    private var videoFormat = VideoFormat()
+    /** Открытая панель настроек видео: обновляется при смене формата. */
+    private var videoSettings: SheetVideoSettingsBinding? = null
+    private var videoSettingsDialog: BottomSheetDialog? = null
+    /** Частота кадров, с которой камера фактически работает (для энкодера). */
+    private var streamFrameRate = 30
     /** Камера настроена на полноразмерные JPEG (режим фото). */
     private var stillsEnabled = false
     private var isRecording = false
@@ -96,6 +106,7 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Ошибка поиска камер", e)
             null
         }
+        videoFormat = loadVideoFormat()
         if (rig == null) {
             showStatus(listOf("Error" to "no pair of rear cameras\nthat can run concurrently"))
             binding.shutterButton.isEnabled = false
@@ -109,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         binding.modeSwitch.addOnButtonCheckedListener { _, id, isChecked ->
             if (isChecked) switchMode(if (id == R.id.photoModeButton) CaptureMode.PHOTO else CaptureMode.VIDEO)
         }
+        binding.videoSettingsButton.setOnClickListener { showVideoSettings() }
         binding.galleryButton.setOnClickListener { openLastMedia() }
         binding.swapEyesSwitch.isChecked = calibration.swapEyes
         binding.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
@@ -138,6 +150,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         // Камеру обязательно освобождаем, иначе её не смогут открыть другие приложения
         if (isRecording) stopRecording(wait = true)
+        videoSettingsDialog?.dismiss()
         stopCamera()
         getSystemService(PowerManager::class.java).removeThermalStatusListener(thermalListener)
         super.onPause()
@@ -183,7 +196,7 @@ class MainActivity : AppCompatActivity() {
             override fun onStats(stats: StereoRenderer.Stats) {
                 runOnUiThread {
                     showStatus(streamRows + listOf(
-                        "Frame rate" to String.format(Locale.US, "%.0f fps", stats.fps),
+                        "Frame rate" to String.format(Locale.US, "%.0f / %d fps", stats.fps, streamFrameRate),
                         "Pair skew" to String.format(Locale.US, "%.1f ms", stats.maxPairSkewMs),
                         "Unpaired" to stats.droppedFrames.toString(),
                     ))
@@ -198,15 +211,16 @@ class MainActivity : AppCompatActivity() {
         previewSurface?.let { renderer.setPreviewSurface(it) }
 
         camera = StereoCamera(getSystemService(CameraManager::class.java), rig, object : StereoCamera.Listener {
-            override fun onStreamSizesChosen(wideSize: Size, mainSize: Size): Pair<Surface, Surface> {
-                renderer.setStreamSizes(wideSize, mainSize)
+            override fun onStreamSizesChosen(wideSize: Size, mainSize: Size, frameRate: Int): Pair<Surface, Surface> {
+                renderer.setStreamSizes(wideSize, mainSize, frameRate)
                 return wideSurface to mainSurface
             }
 
-            override fun onStarted(wideSize: Size, mainSize: Size, stillsEnabled: Boolean) {
+            override fun onStarted(wideSize: Size, mainSize: Size, frameRate: Int, stillsEnabled: Boolean) {
                 val out = renderer.outputSize
                 runOnUiThread {
                     this@MainActivity.stillsEnabled = stillsEnabled
+                    streamFrameRate = frameRate
                     val main = rig.main.jpegSize
                     streamRows = if (stillsEnabled && main != null) {
                         listOf("Photo" to "${main.height * 2}×${main.width}")
@@ -223,7 +237,7 @@ class MainActivity : AppCompatActivity() {
             override fun onError(message: String) {
                 runOnUiThread { Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show() }
             }
-        }, mode, wideSizeOverride()).also { it.open() }
+        }, mode, videoFormat, wideSizeOverride()).also { it.open() }
     }
 
     /** Отладочный запуск: adb shell am start ... --es wide_size 2048x1536 */
@@ -246,6 +260,32 @@ class MainActivity : AppCompatActivity() {
             stopCamera()
             startCamera()
         }
+    }
+
+    /** Смена формата видео перезапускает камеру: размеры потоков и fps задаются при настройке сессии. */
+    private fun switchVideoFormat(newFormat: VideoFormat) {
+        if (newFormat == videoFormat || isRecording) return
+        videoFormat = newFormat
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putString(KEY_VIDEO_ASPECT, videoFormat.aspect.name)
+            .putInt(KEY_VIDEO_FPS, videoFormat.frameRate)
+            .apply()
+        updateShutterUi()
+        if (camera != null) {
+            stopCamera()
+            startCamera()
+        }
+    }
+
+    private fun loadVideoFormat(): VideoFormat {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val name = prefs.getString(KEY_VIDEO_ASPECT, null)
+        val aspect = VideoAspect.entries.firstOrNull { it.name == name } ?: VideoAspect.RATIO_4_3
+        var format = VideoFormat(aspect).withFrameRate(prefs.getInt(KEY_VIDEO_FPS, 30))
+        // Сохранённый формат может не поддерживаться этой камерой
+        if (rig?.supports60 != true) format = format.withFrameRate(30)
+        if (rig?.supports169 != true) format = format.withAspect(VideoAspect.RATIO_4_3)
+        return format
     }
 
     private fun loadMode(): CaptureMode {
@@ -271,10 +311,56 @@ class MainActivity : AppCompatActivity() {
         // Во время записи всё, что перезапускает камеру или открывает другие экраны, недоступно
         binding.photoModeButton.isEnabled = !isRecording
         binding.videoModeButton.isEnabled = !isRecording
+        updateVideoFormatUi()
         for (view in listOf(binding.galleryButton, binding.aboutButton)) {
             view.isEnabled = !isRecording
             view.animate().alpha(if (isRecording) 0f else 1f).setDuration(150)
         }
+    }
+
+    /** Кнопка формата видео: видна только в режиме видео и если камера умеет что-то кроме 4:3. */
+    private fun updateVideoFormatUi() {
+        val is169 = videoFormat.aspect == VideoAspect.RATIO_16_9
+        binding.videoSettingsButton.visibility =
+            if (mode == CaptureMode.VIDEO && rig?.supports169 == true) View.VISIBLE else View.INVISIBLE
+        binding.videoSettingsButton.text = getString(R.string.video_format_short,
+            getString(if (is169) R.string.aspect_16_9 else R.string.aspect_4_3), videoFormat.frameRate)
+        binding.videoSettingsButton.isEnabled = !isRecording
+
+        val sheet = videoSettings ?: return
+        sheet.aspectValue.setText(if (is169) R.string.aspect_16_9_value else R.string.aspect_4_3_value)
+        sheet.aspect43Option.isChecked = !is169
+        sheet.aspect169Option.isChecked = is169
+        sheet.frameRateValue.text = videoFormat.frameRate.toString()
+        sheet.fps30Option.isChecked = videoFormat.frameRate == 30
+        sheet.fps60Option.isChecked = videoFormat.frameRate == 60
+    }
+
+    /** Панель «Настройки видео» по образцу Google Камеры. */
+    private fun showVideoSettings() {
+        if (isRecording || videoSettingsDialog != null) return
+        val sheet = SheetVideoSettingsBinding.inflate(layoutInflater)
+        sheet.frameRateRow.visibility = if (rig?.supports60 == true) View.VISIBLE else View.GONE
+        // Варианты ведут себя как переключатели: нажатие на выбранный ничего не меняет
+        fun option(button: View, format: () -> VideoFormat) = button.setOnClickListener {
+            switchVideoFormat(format())
+            updateVideoFormatUi()
+        }
+        option(sheet.aspect43Option) { videoFormat.withAspect(VideoAspect.RATIO_4_3) }
+        option(sheet.aspect169Option) { videoFormat.withAspect(VideoAspect.RATIO_16_9) }
+        option(sheet.fps30Option) { videoFormat.withFrameRate(30) }
+        option(sheet.fps60Option) { videoFormat.withFrameRate(60) }
+
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        dialog.setOnDismissListener {
+            videoSettings = null
+            videoSettingsDialog = null
+        }
+        videoSettings = sheet
+        videoSettingsDialog = dialog
+        updateVideoFormatUi()
+        dialog.show()
     }
 
     private fun stopCamera() {
@@ -409,7 +495,7 @@ class MainActivity : AppCompatActivity() {
         val size = renderer.outputSize
         if (size.width == 0) return
         val withAudio = hasPermission(Manifest.permission.RECORD_AUDIO)
-        val frameRate = rig?.fpsRange?.upper ?: 30
+        val frameRate = streamFrameRate
 
         binding.shutterButton.isEnabled = false
         io.execute {
@@ -597,6 +683,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_VERTICAL = "vertical_shift"
         private const val KEY_SWAP = "swap_eyes"
         private const val KEY_MODE = "capture_mode"
+        private const val KEY_VIDEO_ASPECT = "video_aspect"
+        private const val KEY_VIDEO_FPS = "video_fps"
         private const val PANEL_GAP_PX = 32
     }
 }

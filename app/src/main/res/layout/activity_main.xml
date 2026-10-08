@@ -83,7 +83,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="24dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
         android:background="@drawable/bg_pill"
         android:backgroundTint="?attr/colorErrorContainer"
         android:fontFamily="sans-serif-medium"
@@ -96,7 +96,7 @@
         app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/preview" />
+        app:layout_constraintBottom_toBottomOf="@id/preview" />
 
     <!-- Карточка подстройки совмещения, открывается кнопкой справа внизу -->
     <com.google.android.material.card.MaterialCardView
@@ -249,6 +249,18 @@
         app:layout_constraintBottom_toTopOf="@id/modeSwitch"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Справа от спуска: текущий формат видео, открывает панель настроек (только в режиме видео) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/videoSettingsButton"
+        style="@style/Widget.My3DCamera.FormatButton"
+        android:layout_width="72dp"
+        android:layout_height="60dp"
+        android:contentDescription="@string/video_settings"
+        app:layout_constraintBottom_toBottomOf="@id/shutterButton"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@id/shutterButton"
+        app:layout_constraintTop_toTopOf="@id/shutterButton" />
 
     <!-- Нижний ряд: о камерах · фото/видео · подстройка -->
     <com.google.android.material.button.MaterialButton

@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.view.Surface
 import java.util.concurrent.Executor
@@ -33,21 +34,27 @@ class StereoCamera(
     private val rig: StereoRig,
     private val listener: Listener,
     private val mode: CaptureMode,
+    private val videoFormat: VideoFormat,
     /** Принудительный размер потока широкоугольной камеры (для замеров). */
     private val wideSizeOverride: Size? = null,
 ) {
     interface Listener {
         /** Вызывается на потоке камеры. Нужно вернуть поверхности для широкоугольной и основной камер. */
-        fun onStreamSizesChosen(wideSize: Size, mainSize: Size): Pair<Surface, Surface>
-        fun onStarted(wideSize: Size, mainSize: Size, stillsEnabled: Boolean)
+        fun onStreamSizesChosen(wideSize: Size, mainSize: Size, frameRate: Int): Pair<Surface, Surface>
+        fun onStarted(wideSize: Size, mainSize: Size, frameRate: Int, stillsEnabled: Boolean)
         fun onError(message: String)
     }
 
     /** Полноразмерные JPEG с обеих камер, снятые одним запросом. */
     class StillPair(val wideJpeg: ByteArray, val mainJpeg: ByteArray)
 
-    /** Вариант конфигурации сессии: размеры потоков превью и нужны ли JPEG-потоки. */
-    private data class SessionPlan(val wideSize: Size, val mainSize: Size, val withStills: Boolean)
+    /** Вариант конфигурации сессии: размеры потоков превью, частота кадров и нужны ли JPEG-потоки. */
+    private data class SessionPlan(
+        val wideSize: Size,
+        val mainSize: Size,
+        val withStills: Boolean,
+        val fpsRange: Range<Int>,
+    )
 
     private val thread = HandlerThread("StereoCamera").apply { start() }
     private val handler = Handler(thread.looper)
@@ -58,6 +65,8 @@ class StereoCamera(
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var previewSurfaces: Pair<Surface, Surface>? = null
+    /** Диапазон fps текущей сессии. */
+    private var fpsRange = rig.fpsRange
     private var wideReader: ImageReader? = null
     private var mainReader: ImageReader? = null
     private var pendingStill: StillCapture? = null
@@ -105,14 +114,24 @@ class StereoCamera(
      */
     private fun sessionPlans(): List<SessionPlan> {
         val video = rig.streamSizeCandidates(CaptureMode.VIDEO, wideSizeOverride)
-        if (mode == CaptureMode.VIDEO) return video.map { SessionPlan(it.first, it.second, false) }
+        if (mode == CaptureMode.VIDEO) {
+            // Если HAL не примет выбранный формат — откатываемся на 16:9 30 fps, затем на 4:3,
+            // чем не снимать вовсе
+            val plans43 = video.map { SessionPlan(it.first, it.second, false, rig.fpsRange) }
+            if (videoFormat.aspect == VideoAspect.RATIO_4_3) return plans43
+            val plans169 = rig.streamSizeCandidates169(30).map { SessionPlan(it.first, it.second, false, rig.fpsRange) }
+            val fps60 = rig.fps60Range
+            if (videoFormat.frameRate <= 30 || fps60 == null) return plans169 + plans43
+            return rig.streamSizeCandidates169(60).map { SessionPlan(it.first, it.second, false, fps60) } +
+                    plans169 + plans43
+        }
         val photo = rig.streamSizeCandidates(CaptureMode.PHOTO, wideSizeOverride)
         val stills = if (rig.wide.jpegSize != null && rig.main.jpegSize != null) {
-            video.map { SessionPlan(it.first, it.second, true) }
+            video.map { SessionPlan(it.first, it.second, true, rig.photoFpsRange) }
         } else {
             emptyList()
         }
-        return stills + photo.map { SessionPlan(it.first, it.second, false) }
+        return stills + photo.map { SessionPlan(it.first, it.second, false, rig.photoFpsRange) }
     }
 
     private fun startSession(camera: CameraDevice, plans: List<SessionPlan>) {
@@ -121,10 +140,11 @@ class StereoCamera(
             listener.onError("The camera doesn't support two concurrent streams")
             return
         }
-        Log.i(TAG, "Потоки: wide=${plan.wideSize}, main=${plan.mainSize}, " +
+        Log.i(TAG, "Потоки: wide=${plan.wideSize}, main=${plan.mainSize}, fps=${plan.fpsRange}, " +
                 "JPEG=${if (plan.withStills) "${rig.wide.jpegSize} + ${rig.main.jpegSize}" else "нет"}")
 
-        val surfaces = listener.onStreamSizesChosen(plan.wideSize, plan.mainSize)
+        fpsRange = plan.fpsRange
+        val surfaces = listener.onStreamSizesChosen(plan.wideSize, plan.mainSize, plan.fpsRange.upper)
         previewSurfaces = surfaces
         val outputs = mutableListOf(
             OutputConfiguration(surfaces.first).apply { setPhysicalCameraId(rig.wide.id) },
@@ -155,7 +175,7 @@ class StereoCamera(
                     session = s
                     try {
                         s.setRepeatingRequest(buildRequest(camera).build(), null, handler)
-                        listener.onStarted(plan.wideSize, plan.mainSize, plan.withStills)
+                        listener.onStarted(plan.wideSize, plan.mainSize, plan.fpsRange.upper, plan.withStills)
                     } catch (e: Exception) {
                         Log.e(TAG, "Не удалось запустить поток кадров", e)
                         listener.onError("Couldn't start the camera: ${e.message}")
@@ -227,7 +247,7 @@ class StereoCamera(
                 if (photo) CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE else CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, if (photo) rig.photoFpsRange else rig.fpsRange)
+            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
             // Стабилизация смещает кадры камер независимо друг от друга и ломает стерео
             set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)

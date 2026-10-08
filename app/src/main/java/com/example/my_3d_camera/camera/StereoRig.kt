@@ -18,6 +18,22 @@ import kotlin.math.abs
  */
 enum class CaptureMode { PHOTO, VIDEO }
 
+/** Соотношение сторон видео. 16:9 — центральный кроп сенсора 4:3: в портрете поле зрения по горизонтали на 25% уже. */
+enum class VideoAspect { RATIO_4_3, RATIO_16_9 }
+
+/**
+ * Формат видео: соотношение сторон и частота кадров выбираются отдельно, как в Google Камере.
+ * 60 fps HAL Pixel 9 отдаёт только на потоках 16:9 (на 4:3 — не больше 30), поэтому
+ * выбор 4:3 переключает на 30 fps, а выбор 60 fps — на 16:9.
+ */
+data class VideoFormat(val aspect: VideoAspect = VideoAspect.RATIO_4_3, val frameRate: Int = 30) {
+    fun withAspect(newAspect: VideoAspect) =
+        if (newAspect == VideoAspect.RATIO_4_3) VideoFormat(newAspect, 30) else copy(aspect = newAspect)
+
+    fun withFrameRate(newFrameRate: Int) =
+        if (newFrameRate == 60) VideoFormat(VideoAspect.RATIO_16_9, newFrameRate) else copy(frameRate = newFrameRate)
+}
+
 data class StereoRig(
     val logicalId: String,
     val wide: PhysicalCamera,
@@ -29,6 +45,8 @@ data class StereoRig(
     val timestampSourceRealtime: Boolean,
     /** Постоянные 30 fps для видео. */
     val fpsRange: Range<Int>,
+    /** Постоянные 60 fps, если камера их поддерживает. */
+    val fps60Range: Range<Int>?,
     /** Плавающий диапазон для фото: в темноте AE может удлинить выдержку вместо подъёма ISO. */
     val photoFpsRange: Range<Int>,
 ) {
@@ -39,14 +57,43 @@ data class StereoRig(
         val normFocal: Float,
         /** То же, но посчитанное по фокусному расстоянию и размеру сенсора в мм. */
         val physicalNormFocal: Float,
-        /** Оптический центр в портретных координатах кадра (0..1, y вниз). */
+        /** Оптический центр в портретных координатах полного кадра сенсора (0..1, y вниз). */
         val principalU: Float,
         val principalV: Float,
+        /** Оптический центр в нормированных координатах активной области сенсора. */
+        val principalSensorX: Float,
+        val principalSensorY: Float,
+        /** Соотношение сторон активной области сенсора (ширина / высота). */
+        val sensorAspect: Float,
         val sensorOrientation: Int,
         val outputSizes: List<Size>,
+        /** Размеры потоков, которые камера отдаёт с частотой 60 fps. */
+        val outputSizes60: List<Size>,
         /** Наибольший JPEG 4:3 — для полноразмерного фото. */
         val jpegSize: Size?,
-    )
+    ) {
+        /**
+         * Оптический центр в портретных координатах потока [size]. Поток другого соотношения
+         * сторон — центральный кроп активной области (16:9 из сенсора 4:3).
+         */
+        fun principalIn(size: Size): Pair<Float, Float> {
+            val aspect = size.width.toFloat() / size.height
+            var x = principalSensorX
+            var y = principalSensorY
+            if (aspect > sensorAspect) {
+                val visible = sensorAspect / aspect
+                y = (y - (1f - visible) / 2f) / visible
+            } else if (aspect < sensorAspect) {
+                val visible = aspect / sensorAspect
+                x = (x - (1f - visible) / 2f) / visible
+            }
+            return sensorToPortrait(x, y, sensorOrientation)
+        }
+    }
+
+    /** Есть ли у камеры видео 16:9 и 60 fps. */
+    val supports169: Boolean get() = streamSizeCandidates169(30).isNotEmpty()
+    val supports60: Boolean get() = fps60Range != null && streamSizeCandidates169(60).isNotEmpty()
 
     /** Во сколько раз широкоугольный кадр нужно увеличить, чтобы совпасть с основным. */
     val wideCropFactor: Float get() = main.normFocal / wide.normFocal
@@ -76,8 +123,36 @@ data class StereoRig(
         return result.distinct()
     }
 
+    /**
+     * Пары размеров (широкоугольная, основная) для видео 16:9. Основная — 1080p,
+     * широкоугольная — вдвое больше: после кропа до поля зрения основной она даёт
+     * столько же пикселей, и глаза одинаково резкие. Для 60 fps — только размеры,
+     * которые камера отдаёт с такой частотой.
+     */
+    fun streamSizeCandidates169(frameRate: Int): List<Pair<Size, Size>> {
+        val mainOutputs = if (frameRate > 30) main.outputSizes60 else main.outputSizes
+        val wideOutputs = if (frameRate > 30) wide.outputSizes60 else wide.outputSizes
+        val mainSizes = PREFERRED_MAIN_SIZES_169.filter { it in mainOutputs }
+        val wide169 = wideOutputs.filter { isSixteenByNine(it) }.sortedBy { it.width }
+        val sharp = mainSizes.mapNotNull { mainSize ->
+            val needWidth = mainSize.width * wideCropFactor
+            val wideSize = wide169.firstOrNull { it.width >= needWidth } ?: wide169.lastOrNull()
+            wideSize?.let { it to mainSize }
+        }
+        val same = mainSizes.filter { it in wideOutputs }.map { it to it }
+        return (sharp + same).distinct()
+    }
+
     companion object {
         private const val TAG = "StereoRig"
+
+        /** Размеры основного потока 16:9 по убыванию качества. */
+        private val PREFERRED_MAIN_SIZES_169 = listOf(
+            Size(1920, 1080),
+            Size(1280, 720),
+        )
+
+        private fun isSixteenByNine(size: Size) = abs(size.width * 9 - size.height * 16) <= 16
 
         /** Размеры основного потока 4:3 по убыванию качества. */
         private val PREFERRED_MAIN_SIZES = listOf(
@@ -87,6 +162,9 @@ data class StereoRig(
             Size(1440, 1080),
             Size(1280, 960),
         )
+
+        /** Длительность кадра при 60 fps (с запасом на округление в HAL). */
+        private const val FRAME_60_NS = 16_700_000L
 
         private fun isFourByThree(size: Size) = abs(size.width * 3 - size.height * 4) <= 8
 
@@ -134,12 +212,14 @@ data class StereoRig(
                     ?: fpsRanges.filter { it.upper == 30 }.maxByOrNull { it.lower }
                     ?: Range(30, 30)
                 val photoFpsRange = fpsRanges.filter { it.upper == fpsRange.upper }.minByOrNull { it.lower } ?: fpsRange
+                val fps60Range = fpsRanges.firstOrNull { it.lower == 60 && it.upper == 60 }
 
-                val rig = StereoRig(id, wide, main, wideIsLeft, baseline, timestampRealtime, fpsRange, photoFpsRange)
+                val rig = StereoRig(id, wide, main, wideIsLeft, baseline, timestampRealtime, fpsRange, fps60Range,
+                    photoFpsRange)
                 Log.i(TAG, "Стереопара: логическая=$id, wide=${wide.id} (${wide.focalLengthMm}мм), " +
                         "main=${main.id} (${main.focalLengthMm}мм), кроп=${"%.3f".format(rig.wideCropFactor)}, " +
                         "wideIsLeft=$wideIsLeft, база=${baseline?.let { "%.1f мм".format(it * 1000) }}, " +
-                        "fps=$fpsRange, фото fps=$photoFpsRange")
+                        "fps=$fpsRange, фото fps=$photoFpsRange, 16:9 60 fps: ${rig.streamSizeCandidates169(60)}")
                 return rig
             }
             return null
@@ -151,6 +231,7 @@ data class StereoRig(
             val orientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
             val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
+            val sizes60 = sizes.filter { map.getOutputMinFrameDuration(SurfaceTexture::class.java, it) <= FRAME_60_NS }
             val jpegSize = map.getOutputSizes(ImageFormat.JPEG)?.filter { isFourByThree(it) }
                 ?.maxByOrNull { it.width.toLong() * it.height }
 
@@ -184,7 +265,8 @@ data class StereoRig(
 
             // Переводим оптический центр из координат сенсора в портретные координаты кадра
             val (pu, pv) = sensorToPortrait(cx / sensorW, cy / sensorH, orientation)
-            return PhysicalCamera(id, focal, normFocal, physicalNormFocal, pu, pv, orientation, sizes, jpegSize)
+            return PhysicalCamera(id, focal, normFocal, physicalNormFocal, pu, pv, cx / sensorW, cy / sensorH,
+                sensorW / sensorH, orientation, sizes, sizes60, jpegSize)
         }
 
         /** Нормированные координаты сенсора (y вниз) → портретные координаты (y вниз). */

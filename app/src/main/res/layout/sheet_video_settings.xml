@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Панель «Настройки видео» по образцу Google Камеры: подпись и значение слева, варианты справа -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingHorizontal="24dp"
+    android:paddingBottom="32dp">
+
+    <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:text="@string/video_settings"
+        android:textAppearance="?attr/textAppearanceTitleLarge"
+        android:textColor="?attr/colorOnSurface" />
+
+    <LinearLayout
+        android:id="@+id/aspectRow"
+        style="@style/Widget.My3DCamera.SheetRow">
+
+        <LinearLayout style="@style/Widget.My3DCamera.SheetRowText">
+
+            <TextView
+                style="@style/Widget.My3DCamera.SheetRowLabel"
+                android:text="@string/aspect_ratio" />
+
+            <TextView
+                android:id="@+id/aspectValue"
+                style="@style/Widget.My3DCamera.SheetRowValue" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/aspect43Option"
+            style="@style/Widget.My3DCamera.SheetOption"
+            android:text="@string/aspect_4_3" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/aspect169Option"
+            style="@style/Widget.My3DCamera.SheetOption"
+            android:layout_marginStart="10dp"
+            android:text="@string/aspect_16_9" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/frameRateRow"
+        style="@style/Widget.My3DCamera.SheetRow">
+
+        <LinearLayout style="@style/Widget.My3DCamera.SheetRowText">
+
+            <TextView
+                style="@style/Widget.My3DCamera.SheetRowLabel"
+                android:text="@string/frame_rate_title" />
+
+            <TextView
+                android:id="@+id/frameRateValue"
+                style="@style/Widget.My3DCamera.SheetRowValue" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/fps30Option"
+            style="@style/Widget.My3DCamera.SheetOption"
+            android:text="30" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/fps60Option"
+            style="@style/Widget.My3DCamera.SheetOption"
+            android:layout_marginStart="10dp"
+            android:text="60" />
+    </LinearLayout>
+</LinearLayout>

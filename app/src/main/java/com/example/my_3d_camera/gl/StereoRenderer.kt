@@ -77,9 +77,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         val stMatrix = FloatArray(16)
         var frames: List<EyeFrame> = emptyList()
 
-        fun allocate(width: Int, height: Int) {
+        fun allocate(width: Int, height: Int, count: Int) {
             releaseFrames()
-            frames = List(RING_SIZE) {
+            frames = List(count) {
                 val tex = GlUtil.createTexture2D(width, height)
                 EyeFrame(tex, GlUtil.createFramebuffer(tex))
             }
@@ -138,6 +138,13 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     /** Размер итогового кадра SBS (ширина обоих глаз вместе). */
     @Volatile var outputSize = Size(0, 0)
         private set
+    /** Оптические центры камер в портретных координатах их потоков. */
+    private var widePrincipal = rig.wide.principalU to rig.wide.principalV
+    private var mainPrincipal = rig.main.principalU to rig.main.principalV
+    /** Кадры двух камер с разницей меньше половины кадра считаем одной парой. */
+    private var pairToleranceNs = 1_000_000_000L / 30 / 2
+    /** Замер цвета ~7 раз в секунду при любой частоте кадров. */
+    private var measureEveryPairs = MEASURE_EVERY_PAIRS
 
     private var statsStart = 0L
     private var statsFrames = 0
@@ -173,15 +180,22 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     }
 
     /** Задаёт размеры потоков камер. Итоговый кадр = два портретных кадра основной камеры рядом. */
-    fun setStreamSizes(wideSize: Size, mainSize: Size) = runSync {
+    fun setStreamSizes(wideSize: Size, mainSize: Size, frameRate: Int) = runSync {
         wide.surfaceTexture.setDefaultBufferSize(wideSize.width, wideSize.height)
         main.surfaceTexture.setDefaultBufferSize(mainSize.width, mainSize.height)
         val rotated = rig.main.sensorOrientation % 180 != 0
         val eyeWidth = if (rotated) mainSize.height else mainSize.width
         val eyeHeight = if (rotated) mainSize.width else mainSize.height
-        wide.allocate(eyeWidth, eyeHeight)
-        main.allocate(eyeWidth, eyeHeight)
+        // Буфер держит одинаковое время ожидания пары (~130 мс) при любой частоте кадров
+        val ringSize = maxOf(RING_SIZE_MIN, (RING_WAIT_NS * frameRate / 1_000_000_000L).toInt() + 1)
+        wide.allocate(eyeWidth, eyeHeight, ringSize)
+        main.allocate(eyeWidth, eyeHeight, ringSize)
         outputSize = Size(eyeWidth * 2, eyeHeight)
+        // Поток 16:9 — кроп сенсора, оптические центры в его координатах другие, чем у 4:3
+        widePrincipal = rig.wide.principalIn(wideSize)
+        mainPrincipal = rig.main.principalIn(mainSize)
+        pairToleranceNs = 1_000_000_000L / frameRate / 2
+        measureEveryPairs = maxOf(1, MEASURE_EVERY_PAIRS * frameRate / 30)
     }
 
     fun setPreviewSurface(surface: Surface?) = runSync {
@@ -266,8 +280,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             // оптические центры: точка (u, v) основного кадра берётся из pw + (u - pm) * s
             val cal = calibration
             val s = 1f / (rig.wideCropFactor * cal.scale)
-            val ou = rig.wide.principalU - rig.main.principalU * s
-            val ov = rig.wide.principalV - rig.main.principalV * s + cal.verticalShift
+            val ou = widePrincipal.first - mainPrincipal.first * s
+            val ov = widePrincipal.second - mainPrincipal.second * s + cal.verticalShift
             cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, s, ou, s, ov, wideGain)
         } else {
             cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, 1f, 0f, 1f, 0f, NO_GAIN)
@@ -285,7 +299,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             var bestMain: EyeFrame? = null
             for (w in wide.frames) {
                 if (!w.valid) continue
-                val m = main.frames.firstOrNull { it.valid && abs(it.timestamp - w.timestamp) <= PAIR_TOLERANCE_NS }
+                val m = main.frames.firstOrNull { it.valid && abs(it.timestamp - w.timestamp) < pairToleranceNs }
                     ?: continue
                 if (bestWide == null || w.timestamp < bestWide.timestamp) {
                     bestWide = w
@@ -334,7 +348,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         }
 
         egl.makeCurrent(idleSurface)
-        if (++pairsSinceMeasure >= MEASURE_EVERY_PAIRS) {
+        if (++pairsSinceMeasure >= measureEveryPairs) {
             pairsSinceMeasure = 0
             updateColorMatch(wideFrame.texture, mainFrame.texture)
         }
@@ -555,15 +569,14 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
 
     companion object {
         private const val TAG = "StereoRenderer"
-        /** Кадры с разницей меньше половины кадра при 30 fps считаем одной парой. */
-        private const val PAIR_TOLERANCE_NS = 15_000_000L
-        /** Сколько обрезанных кадров каждой камеры можно держать в ожидании пары (~130 мс). */
-        private const val RING_SIZE = 5
+        /** Сколько времени обрезанные кадры каждой камеры могут ждать пару. */
+        private const val RING_WAIT_NS = 130_000_000L
+        private const val RING_SIZE_MIN = 5
 
         /** Размер уменьшенного кадра глаза для сравнения цвета (портрет 3:4). */
         private const val MEASURE_W = 48
         private const val MEASURE_H = 64
-        /** Замер цвета раз в столько пар (~7 раз в секунду). */
+        /** Замер цвета раз в столько пар при 30 fps (~7 раз в секунду). */
         private const val MEASURE_EVERY_PAIRS = 4
         /** Какую долю остаточной разницы убирать за один замер. */
         private const val GAIN_SMOOTHING = 0.3f
