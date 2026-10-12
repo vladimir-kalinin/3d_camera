@@ -20,11 +20,11 @@ so the result is ready to watch in a VR headset or on a 3D display right away. D
 ## Screenshots
 
 <p align="center">
-<a href="docs/screenshot_1.png"><img src="docs/screenshot_1.png" width="160" alt="Video mode, 4:3"></a>
-<a href="docs/screenshot_2.png"><img src="docs/screenshot_2.png" width="160" alt="Video mode, 16:9"></a>
-<a href="docs/screenshot_3.png"><img src="docs/screenshot_3.png" width="160" alt="Recording"></a>
-<a href="docs/screenshot_4.png"><img src="docs/screenshot_4.png" width="160" alt="Photo mode"></a>
-<a href="docs/screenshot_5.png"><img src="docs/screenshot_5.png" width="160" alt="Settings"></a>
+<a href="docs/screenshot_1.png"><img src="docs/screenshot_1.png" width="150" alt="Video mode, 4:3"></a>
+<a href="docs/screenshot_2.png"><img src="docs/screenshot_2.png" width="150" alt="Video mode, 16:9"></a>
+<a href="docs/screenshot_3.png"><img src="docs/screenshot_3.png" width="150" alt="Recording"></a>
+<a href="docs/screenshot_4.png"><img src="docs/screenshot_4.png" width="150" alt="Photo mode"></a>
+<a href="docs/screenshot_5.png"><img src="docs/screenshot_5.png" width="150" alt="Settings"></a>
 </p>
 
 The preview shows both eyes overlaid at 50% opacity — saved photos and videos are always Side-by-Side.
