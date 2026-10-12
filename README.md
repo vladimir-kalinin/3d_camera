@@ -69,3 +69,7 @@ adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.Main
 ```
 
 Требования: Android 11+, логическая камера с двумя задними физическими камерами.
+
+## Лицензия
+
+[MIT](LICENSE)
