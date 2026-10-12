@@ -1,7 +1,39 @@
-# Stereo Camera
+<p align="center"><img src="docs/icon.png" width="150" alt="Stereo Camera icon"></p>
+<h2 align="center"><b>Stereo Camera</b></h2>
+<h4 align="center">3D Side-by-Side photos and videos from two rear cameras of your Android phone.</h4>
 
-An Android app that shoots stereo photos and videos in Side-by-Side (SBS) format using two rear
-cameras of a phone at once: the ultra-wide and the main one. Developed and tested on Pixel 9.
+<p align="center">
+<a href="https://github.com/vladimir-kalinin/3d_camera/releases/latest"><img src="https://img.shields.io/github/v/release/vladimir-kalinin/3d_camera" alt="Latest release"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/vladimir-kalinin/3d_camera" alt="License: MIT"></a>
+<img src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white" alt="Android 11+">
+<img src="https://img.shields.io/badge/tested%20on-Pixel%209-4285F4" alt="Tested on Pixel 9">
+</p>
+
+<hr>
+<p align="center"><a href="#screenshots">Screenshots</a> &bull; <a href="#features">Features</a> &bull; <a href="#installation">Installation</a> &bull; <a href="#requirements">Requirements</a> &bull; <a href="#building">Building</a> &bull; <a href="#architecture">Architecture</a> &bull; <a href="#license">License</a></p>
+<hr>
+
+Stereo Camera shoots stereo photos and videos in Side-by-Side (SBS) format using two rear cameras
+of a phone at once: the ultra-wide and the main one. The SBS frame is composed on the GPU in real time,
+so the result is ready to watch in a VR headset or on a 3D display right away. Developed and tested on Pixel 9.
+
+## Screenshots
+
+<p align="center">
+<a href="docs/screenshot_1.png"><img src="docs/screenshot_1.png" width="160" alt="Video mode, 4:3"></a>
+<a href="docs/screenshot_2.png"><img src="docs/screenshot_2.png" width="160" alt="Video mode, 16:9"></a>
+<a href="docs/screenshot_3.png"><img src="docs/screenshot_3.png" width="160" alt="Recording"></a>
+<a href="docs/screenshot_4.png"><img src="docs/screenshot_4.png" width="160" alt="Photo mode"></a>
+<a href="docs/screenshot_5.png"><img src="docs/screenshot_5.png" width="160" alt="Settings"></a>
+</p>
+
+The preview shows both eyes overlaid at 50% opacity — saved photos and videos are always Side-by-Side.
+
+## Installation
+
+Download the APK from the [latest release](https://github.com/vladimir-kalinin/3d_camera/releases/latest),
+open it on the phone and allow installing apps from this source. Updates are installed the same way, over
+the existing app.
 
 ## Features
 
