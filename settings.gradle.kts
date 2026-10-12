@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "my_3d_camera"
+rootProject.name = "StereoCamera"
 include(":app")
  

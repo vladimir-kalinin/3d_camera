@@ -1,4 +1,4 @@
-package com.example.my_3d_camera.media
+package io.github.vladimir_kalinin.stereocamera.media
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,9 +10,9 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import com.example.my_3d_camera.camera.StereoRig
-import com.example.my_3d_camera.gl.ColorMatch
-import com.example.my_3d_camera.gl.StereoRenderer
+import io.github.vladimir_kalinin.stereocamera.camera.StereoRig
+import io.github.vladimir_kalinin.stereocamera.gl.ColorMatch
+import io.github.vladimir_kalinin.stereocamera.gl.StereoRenderer
 
 /**
  * Собирает полноразмерное SBS-фото из двух JPEG (в ориентации сенсора).

@@ -1,4 +1,4 @@
-package com.example.my_3d_camera.camera
+package io.github.vladimir_kalinin.stereocamera.camera
 
 import android.annotation.SuppressLint
 import android.graphics.ImageFormat

@@ -1,4 +1,4 @@
-package com.example.my_3d_camera.media
+package io.github.vladimir_kalinin.stereocamera.media
 
 import android.annotation.SuppressLint
 import android.media.AudioFormat

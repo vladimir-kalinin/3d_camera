@@ -18,7 +18,7 @@
         android:theme="@style/Theme.My3DCamera"
         tools:targetApi="31">
         <activity
-            android:name="com.example.my_3d_camera.MainActivity"
+            android:name="io.github.vladimir_kalinin.stereocamera.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:screenOrientation="portrait">

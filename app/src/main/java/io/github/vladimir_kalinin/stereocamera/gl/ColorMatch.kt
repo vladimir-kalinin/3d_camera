@@ -1,4 +1,4 @@
-package com.example.my_3d_camera.gl
+package io.github.vladimir_kalinin.stereocamera.gl
 
 import kotlin.math.pow
 

@@ -49,13 +49,31 @@ with Android Studio works):
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Application ids: debug — `com.example.my_3d_camera.dev` (shown as "Stereo Camera dev"),
-release — `com.example.my_3d_camera.release`. Calibration settings are stored separately per build.
+Application ids: release — `io.github.vladimir_kalinin.stereocamera`, debug — the same with `.dev` suffix
+(shown as "Stereo Camera dev"), so both can be installed side by side. Calibration settings are stored
+separately per build.
 
-Debug option — force the ultra-wide stream size (useful for measurements):
+### Release signing
+
+Without a signing key `./gradlew assembleRelease` produces an unsigned APK. To sign it, create a
+`keystore.properties` file in the project root (it is git-ignored):
+
+```properties
+storeFile=/path/to/release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+or set the environment variables `STEREOCAMERA_STORE_FILE`, `STEREOCAMERA_STORE_PASSWORD`,
+`STEREOCAMERA_KEY_ALIAS`, `STEREOCAMERA_KEY_PASSWORD`.
+
+### Debug option
+
+Force the ultra-wide stream size (useful for measurements):
 
 ```bash
-adb shell am start -n com.example.my_3d_camera.dev/com.example.my_3d_camera.MainActivity --es wide_size 2048x1536
+adb shell am start -n io.github.vladimir_kalinin.stereocamera.dev/io.github.vladimir_kalinin.stereocamera.MainActivity --es wide_size 2048x1536
 ```
 
 `am start` does not restart an already open activity: to apply a new parameter, `am force-stop` the app first.

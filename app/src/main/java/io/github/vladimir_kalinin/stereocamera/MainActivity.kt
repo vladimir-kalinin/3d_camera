@@ -1,4 +1,4 @@
-package com.example.my_3d_camera
+package io.github.vladimir_kalinin.stereocamera
 
 import android.Manifest
 import android.content.Intent
@@ -27,18 +27,18 @@ import androidx.core.content.ContextCompat
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
-import com.example.my_3d_camera.camera.CaptureMode
-import com.example.my_3d_camera.camera.VideoAspect
-import com.example.my_3d_camera.camera.VideoFormat
-import com.example.my_3d_camera.camera.StereoCamera
-import com.example.my_3d_camera.camera.StereoRig
-import com.example.my_3d_camera.databinding.ActivityMainBinding
-import com.example.my_3d_camera.databinding.SheetSettingsBinding
-import com.example.my_3d_camera.databinding.SheetVideoSettingsBinding
-import com.example.my_3d_camera.gl.StereoRenderer
-import com.example.my_3d_camera.media.MediaSaver
-import com.example.my_3d_camera.media.SbsVideoRecorder
-import com.example.my_3d_camera.media.StillComposer
+import io.github.vladimir_kalinin.stereocamera.camera.CaptureMode
+import io.github.vladimir_kalinin.stereocamera.camera.VideoAspect
+import io.github.vladimir_kalinin.stereocamera.camera.VideoFormat
+import io.github.vladimir_kalinin.stereocamera.camera.StereoCamera
+import io.github.vladimir_kalinin.stereocamera.camera.StereoRig
+import io.github.vladimir_kalinin.stereocamera.databinding.ActivityMainBinding
+import io.github.vladimir_kalinin.stereocamera.databinding.SheetSettingsBinding
+import io.github.vladimir_kalinin.stereocamera.databinding.SheetVideoSettingsBinding
+import io.github.vladimir_kalinin.stereocamera.gl.StereoRenderer
+import io.github.vladimir_kalinin.stereocamera.media.MediaSaver
+import io.github.vladimir_kalinin.stereocamera.media.SbsVideoRecorder
+import io.github.vladimir_kalinin.stereocamera.media.StillComposer
 import java.util.Locale
 import java.util.concurrent.Executors
 

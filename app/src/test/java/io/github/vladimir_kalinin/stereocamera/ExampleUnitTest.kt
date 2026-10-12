@@ -1,4 +1,4 @@
-package com.example.my_3d_camera
+package io.github.vladimir_kalinin.stereocamera
 
 import org.junit.Test
 import org.junit.Assert.*

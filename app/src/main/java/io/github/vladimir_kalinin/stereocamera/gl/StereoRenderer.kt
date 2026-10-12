@@ -1,4 +1,4 @@
-package com.example.my_3d_camera.gl
+package io.github.vladimir_kalinin.stereocamera.gl
 
 import android.graphics.SurfaceTexture
 import android.opengl.EGLSurface
@@ -11,7 +11,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.Surface
-import com.example.my_3d_camera.camera.StereoRig
+import io.github.vladimir_kalinin.stereocamera.camera.StereoRig
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer

@@ -1,14 +1,25 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+// Ключ подписи release: keystore.properties в корне проекта (не в git) или переменные окружения.
+// Без них release собирается неподписанной.
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun signingValue(key: String, env: String): String? =
+    keystoreProps.getProperty(key) ?: System.getenv(env)
+
 android {
-    namespace = "com.example.my_3d_camera"
+    namespace = "io.github.vladimir_kalinin.stereocamera"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.my_3d_camera"
+        applicationId = "io.github.vladimir_kalinin.stereocamera"
         minSdk = 30
         targetSdk = 34
         versionCode = 1
@@ -17,16 +28,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        val storePath = signingValue("storeFile", "STEREOCAMERA_STORE_FILE")
+        if (storePath != null) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = signingValue("storePassword", "STEREOCAMERA_STORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "STEREOCAMERA_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "STEREOCAMERA_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
-            // Отдельный id, чтобы не конфликтовать со старой установленной версией
+            // Отдельный id, чтобы dev-сборка стояла рядом с release
             applicationIdSuffix = ".dev"
         }
         release {
-            // Отдельный id: у старой версии com.example.my_3d_camera другой ключ подписи
-            applicationIdSuffix = ".release"
-            // Для личного использования подписываем debug-ключом; для Google Play нужен свой ключ
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
