@@ -3,7 +3,7 @@
 # Запуск из корня репозитория:
 #   python3 tools/readme_assets.py icon
 #   python3 tools/readme_assets.py frame screenshot1.png screenshot2.png ...
-# Результат — в docs/: icon.png и screenshot_N.png в порядке аргументов.
+# Результат — в docs/images/: icon.png и screenshot_N.png в порядке аргументов.
 import base64
 import io
 import sys
@@ -13,7 +13,7 @@ import resvg_py
 from PIL import Image
 
 DRAWABLE = "app/src/main/res/drawable/"
-OUT = "docs/"
+OUT = "docs/images/"
 A = "{http://schemas.android.com/apk/res/android}"
 AAPT = "{http://schemas.android.com/aapt}"
 
