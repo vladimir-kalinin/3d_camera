@@ -110,6 +110,38 @@
             app:labelBehavior="gone"
             app:tickVisible="false" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/calibration_horizontal"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <TextView
+                android:id="@+id/horizontalValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodyMedium" />
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/horizontalSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/calibration_horizontal"
+            android:stepSize="1"
+            android:valueFrom="0"
+            android:valueTo="200"
+            app:labelBehavior="gone"
+            app:tickVisible="false" />
+
         <!-- Нужно один раз, если камеры стоят иначе, чем сообщает HAL -->
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/swapEyesSwitch"
@@ -129,6 +161,50 @@
             android:text="@string/overlay_preview"
             android:textAppearance="?attr/textAppearanceBodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <!-- Рамка вокруг каждого глаза в превью и фото: окно, за которым видна сцена -->
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/eyeFrameSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="@string/eye_frame"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <!-- Плавающее окно: плюс выносит рамку перед сценой -->
+        <LinearLayout
+            android:id="@+id/frameShiftRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/frame_shift"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <TextView
+                android:id="@+id/frameShiftValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodyMedium" />
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/frameShiftSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/frame_shift"
+            android:stepSize="1"
+            android:valueFrom="0"
+            android:valueTo="200"
+            app:labelBehavior="gone"
+            app:tickVisible="false" />
 
         <!-- Карточка с размером кадра, fps и рассинхроном поверх превью -->
         <com.google.android.material.materialswitch.MaterialSwitch

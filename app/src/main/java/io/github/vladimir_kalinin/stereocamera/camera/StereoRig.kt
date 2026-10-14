@@ -89,6 +89,17 @@ data class StereoRig(
             }
             return sensorToPortrait(x, y, sensorOrientation)
         }
+
+        /**
+         * Какая доля ширины и высоты портретного кадра всего сенсора видна в потоке [size]:
+         * у 16:9 из сенсора 4:3 в портрете обрезана ширина (видно 75%).
+         */
+        fun portraitVisible(size: Size): Pair<Float, Float> {
+            val aspect = size.width.toFloat() / size.height
+            val visibleX = if (aspect < sensorAspect) aspect / sensorAspect else 1f
+            val visibleY = if (aspect > sensorAspect) sensorAspect / aspect else 1f
+            return if (sensorOrientation % 180 != 0) visibleY to visibleX else visibleX to visibleY
+        }
     }
 
     /** Есть ли у камеры видео 16:9 и 60 fps. */

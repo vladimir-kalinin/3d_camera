@@ -18,7 +18,7 @@
         android:id="@+id/eyeDivider"
         android:layout_width="1dp"
         android:layout_height="0dp"
-        android:background="#80FFFFFF"
+        android:background="@android:color/black"
         app:layout_constraintBottom_toBottomOf="@id/preview"
         app:layout_constraintEnd_toEndOf="@id/preview"
         app:layout_constraintStart_toStartOf="@id/preview"

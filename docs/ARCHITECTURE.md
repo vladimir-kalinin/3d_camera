@@ -6,7 +6,8 @@ For building and debugging see [DEVELOPMENT.md](DEVELOPMENT.md).
 ## Capture modes
 
 - **Photo** — both cameras take a full-resolution JPEG (4032×3024) in a single request,
-  and a 6048×4032 SBS image is composed on the CPU (`StillComposer`) with the same geometry as the preview.
+  and a 6048×4032 SBS image is composed on the CPU (`StillComposer`) with the same geometry as the preview
+  (6464×4240 with the frame, see below).
 - **Video** — aspect ratio and frame rate are chosen separately in the "Video settings" panel
   (the button with the current format next to the shutter, modeled after Google Camera):
   - **4:3** — both cameras stream 2048×1536, SBS 3072×2048, 30 fps only;
@@ -46,8 +47,30 @@ The ultra-wide frame is cropped to the main camera's field of view (≈1.976× o
 aligned. A 16:9 stream is a center crop of the 4:3 sensor, so optical centers are converted into its
 coordinates (`principalIn`).
 
+Manual fine-tuning in Settings: ultra-wide scale, vertical shift and horizontal shift. The camera modules
+are not perfectly parallel, so without the horizontal shift distant objects don't coincide. Shifts are stored
+as fractions of the **full sensor frame** and converted into stream coordinates (`portraitVisible`):
+in portrait a 16:9 stream shows only 75% of the 4:3 width, and a shift taken as a fraction of the stream
+would be 25% too small there. Calibrated once in 4:3, the shifts fit 16:9 and photos as well.
+
 The geometry is implemented twice: in the shader (`StereoRenderer.renderEye`) and in
 `StillComposer.eyeMatrix` for full-size photos. **When changing one, change the other.**
+
+### Eye frame
+
+An optional black frame with rounded corners around each eye (Settings → "Frame around photos") in the preview,
+photos and videos. It is added **around** the image: each eye gets a border of ~3.5% of its width
+(`framePadding`, rounded to 8 px so video dimensions stay multiples of 16), so the picture keeps its full
+resolution and the frame covers only the rounded corners. Photo 6048×4032 → 6464×4240, video 3072×2048 →
+3296×2160, 2160×1920 → 2320×2000.
+
+"Frame depth" (0…+10% of the full frame width) is a floating stereo window: it covers the outer edge of each
+eye (the left edge of the left half, the right edge of the right half), which moves the frame in front of
+the scene for parallel (glasses) viewing. For cross-eyed viewing the direction is reversed.
+
+The frame is also implemented twice: `StereoRenderer.ComposeProgram` (shader, shape from `frameShape`)
+and `StillComposer.drawFrame`. Whether a video has the frame is fixed when recording starts — the encoder
+frame size can't change mid-recording.
 
 ### Color matching
 
@@ -80,7 +103,7 @@ the `STILL_CAPTURE` stream use case. The session in photo mode: two 2048×1536 p
 4032×3024 JPEG streams (preview runs at ~20–23 fps). If the HAL rejects the JPEG streams, the photo is taken
 from a GL frame (`StereoRenderer.capturePhoto`) with a larger ultra-wide stream.
 
-Composing a 6048×4032 photo on the CPU needs ~160 MB, hence `largeHeap` in the manifest.
+Composing a 6048×4032 photo on the CPU needs ~160 MB (~175 MB with the frame), hence `largeHeap` in the manifest.
 
 ### UI
 

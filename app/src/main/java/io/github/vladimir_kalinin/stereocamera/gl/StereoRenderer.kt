@@ -1,5 +1,6 @@
 package io.github.vladimir_kalinin.stereocamera.gl
 
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
@@ -19,6 +20,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Собирает кадр Side-by-Side из двух камер на GPU в реальном времени.
@@ -55,11 +57,31 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     data class Calibration(
         /** Дополнительный масштаб широкоугольной картинки (1.0 = как в калибровке). */
         val scale: Float = 1f,
-        /** Сдвиг широкоугольной картинки по вертикали, в долях высоты кадра. */
+        /** Сдвиг широкоугольной картинки по вертикали, в долях высоты полного кадра сенсора. */
         val verticalShift: Float = 0f,
+        /**
+         * Горизонтальное смещение глаз друг относительно друга, в долях ширины полного кадра сенсора
+         * (у потока 16:9 кадр уже, и в его координатах сдвиг больше, см. [StereoRig.Camera.portraitVisible]).
+         * Модули камер стоят не идеально параллельно, и далёкие предметы без подстройки
+         * двоятся. Плюс отодвигает сцену назад (содержимое глаз расходится к внешним краям).
+         */
+        val horizontalShift: Float = 0f,
         /** Поменять глаза местами. */
         val swapEyes: Boolean = false,
-    )
+    ) {
+        /** Сдвиг широкоугольной картинки по u: её содержимое уходит к внешнему краю глаза. */
+        fun wideShiftU(rig: StereoRig): Float =
+            if (rig.wideIsLeft != swapEyes) horizontalShift else -horizontalShift
+    }
+
+    /** Рамка глаза: где лежит кадр, скруглённое окно и радиус его углов, в пикселях. */
+    class FrameShape(val image: RectF, val window: RectF, val radius: Float) {
+        fun scaled(sx: Float, sy: Float) = FrameShape(
+            RectF(image.left * sx, image.top * sy, image.right * sx, image.bottom * sy),
+            RectF(window.left * sx, window.top * sy, window.right * sx, window.bottom * sy),
+            radius * sx,
+        )
+    }
 
     /** Обрезанный кадр одной камеры, ждущий пару. */
     private class EyeFrame(val texture: Int, val framebuffer: Int) {
@@ -122,6 +144,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     private var previewSurface: EGLSurface? = null
     private var recordSurface: EGLSurface? = null
     private var lastRecordPtsNs = 0L
+    /** Рамка в видео задаётся на старте записи: размер кадра энкодера уже не поменять. */
+    private var recordFrame = false
     private var pendingPhoto: ((ByteBuffer, Int, Int) -> Unit)? = null
 
     // Подгонка цвета широкоугольной под основную: замер по уменьшенным кадрам глаз
@@ -138,12 +162,29 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     /** Превью: глаза наложены друг на друга полупрозрачно (как у обычной камеры) вместо SBS. */
     @Volatile var overlayPreview = false
 
+    /** Рамка со скруглёнными углами вокруг каждого глаза в превью, фото и видео. */
+    @Volatile var eyeFrame = false
+
+    /** Сдвиг рамки по глубине, см. [frameShape]. */
+    @Volatile var frameShift = 0f
+
     /** Размер итогового кадра SBS (ширина обоих глаз вместе). */
     @Volatile var outputSize = Size(0, 0)
         private set
+
+    /** Размер превью, видео и фото из GL-кадра: с рамкой к каждому глазу добавляются поля. */
+    fun framedOutputSize(frame: Boolean = eyeFrame): Size {
+        val size = outputSize
+        if (!frame || size.width == 0) return size
+        val eye = framedSize(size.width / 2, size.height)
+        return Size(eye.width * 2, eye.height)
+    }
     /** Оптические центры камер в портретных координатах их потоков. */
     private var widePrincipal = rig.wide.principalU to rig.wide.principalV
     private var mainPrincipal = rig.main.principalU to rig.main.principalV
+    /** Доли полного кадра камер, видные в их потоках (для пересчёта ручных сдвигов). */
+    private var wideVisible = 1f to 1f
+    private var mainVisible = 1f to 1f
     /** Кадры двух камер с разницей меньше половины кадра считаем одной парой. */
     private var pairToleranceNs = 1_000_000_000L / 30 / 2
     /** Замер цвета ~7 раз в секунду при любой частоте кадров. */
@@ -197,6 +238,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         // Поток 16:9 — кроп сенсора, оптические центры в его координатах другие, чем у 4:3
         widePrincipal = rig.wide.principalIn(wideSize)
         mainPrincipal = rig.main.principalIn(mainSize)
+        wideVisible = rig.wide.portraitVisible(wideSize)
+        mainVisible = rig.main.portraitVisible(mainSize)
         pairToleranceNs = 1_000_000_000L / frameRate / 2
         measureEveryPairs = maxOf(1, MEASURE_EVERY_PAIRS * frameRate / 30)
     }
@@ -209,7 +252,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         previewSurface = surface?.let { egl.createWindowSurface(it) }
     }
 
-    fun startRecording(surface: Surface) = runSync {
+    /** [frame] — с рамкой, тогда поверхность энкодера размером [framedOutputSize]. */
+    fun startRecording(surface: Surface, frame: Boolean) = runSync {
+        recordFrame = frame
         recordSurface = egl.createWindowSurface(surface)
         lastRecordPtsNs = 0L
     }
@@ -283,8 +328,8 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             // оптические центры: точка (u, v) основного кадра берётся из pw + (u - pm) * s
             val cal = calibration
             val s = 1f / (rig.wideCropFactor * cal.scale)
-            val ou = widePrincipal.first - mainPrincipal.first * s
-            val ov = widePrincipal.second - mainPrincipal.second * s + cal.verticalShift
+            val ou = widePrincipal.first - mainPrincipal.first * s + cal.wideShiftU(rig) / wideVisible.first
+            val ov = widePrincipal.second - mainPrincipal.second * s + cal.verticalShift / wideVisible.second
             cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, s, ou, s, ov, wideGain)
         } else {
             cameraProgram.draw(quad, stream.oesTexture, stream.stMatrix, 1f, 0f, 1f, 0f, NO_GAIN)
@@ -328,11 +373,10 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         val wideLeft = rig.wideIsLeft != calibration.swapEyes
         val left = if (wideLeft) wideFrame.texture else mainFrame.texture
         val right = if (wideLeft) mainFrame.texture else wideFrame.texture
-        val size = outputSize
-
         recordSurface?.let { surface ->
             egl.makeCurrent(surface)
-            compose(left, right, size.width, size.height, flipY = false)
+            val size = framedOutputSize(recordFrame)
+            compose(left, right, size.width, size.height, flipY = false, recordFrame)
             egl.setPresentationTime(surface, toMonotonicNs(mainFrame.timestamp))
             egl.swapBuffers(surface)
         }
@@ -340,13 +384,15 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         pendingPhoto?.let { callback ->
             pendingPhoto = null
             egl.makeCurrent(idleSurface)
-            callback(renderOffscreen(left, right, size.width, size.height), size.width, size.height)
+            val photo = framedOutputSize()
+            callback(renderOffscreen(left, right, photo.width, photo.height), photo.width, photo.height)
         }
 
         previewSurface?.let { surface ->
             egl.makeCurrent(surface)
             val (w, h) = egl.querySize(surface)
-            if (overlayPreview) overlay(left, right, w, h) else compose(left, right, w, h, flipY = false)
+            val frame = eyeFrame
+            if (overlayPreview) overlay(left, right, w, h, frame) else compose(left, right, w, h, flipY = false, frame)
             egl.swapBuffers(surface)
         }
 
@@ -367,9 +413,9 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
     private fun updateColorMatch(wideTexture: Int, mainTexture: Int) {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, measureFramebuffer)
         GLES20.glViewport(0, 0, MEASURE_W, MEASURE_H)
-        composeProgram.draw(quad, mainTexture, flipY = false)
+        composeProgram.draw(quad, mainTexture, flipY = false, MEASURE_W, MEASURE_H, frame = null)
         GLES20.glViewport(MEASURE_W, 0, MEASURE_W, MEASURE_H)
-        composeProgram.draw(quad, wideTexture, flipY = false)
+        composeProgram.draw(quad, wideTexture, flipY = false, MEASURE_W, MEASURE_H, frame = null)
         measurePixels.rewind()
         GLES20.glReadPixels(0, 0, MEASURE_W * 2, MEASURE_H, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, measurePixels)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -394,25 +440,35 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         }
     }
 
-    private fun compose(left: Int, right: Int, width: Int, height: Int, flipY: Boolean) {
+    private fun compose(left: Int, right: Int, width: Int, height: Int, flipY: Boolean, frame: Boolean) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         val half = width / 2
         GLES20.glViewport(0, 0, half, height)
-        composeProgram.draw(quad, left, flipY)
+        composeProgram.draw(quad, left, flipY, half, height, eyeFrameShape(frame, half, height, leftEye = true))
         GLES20.glViewport(half, 0, width - half, height)
-        composeProgram.draw(quad, right, flipY)
+        composeProgram.draw(quad, right, flipY, width - half, height, eyeFrameShape(frame, width - half, height, leftEye = false))
     }
 
     /** Правый глаз поверх левого с прозрачностью 50%. */
-    private fun overlay(left: Int, right: Int, width: Int, height: Int) {
+    private fun overlay(left: Int, right: Int, width: Int, height: Int, frame: Boolean) {
         GLES20.glViewport(0, 0, width, height)
-        composeProgram.draw(quad, left, flipY = false)
+        composeProgram.draw(quad, left, flipY = false, width, height, eyeFrameShape(frame, width, height, leftEye = true))
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendColor(0f, 0f, 0f, OVERLAY_ALPHA)
         GLES20.glBlendFunc(GLES20.GL_CONSTANT_ALPHA, GLES20.GL_ONE_MINUS_CONSTANT_ALPHA)
-        composeProgram.draw(quad, right, flipY = false)
+        composeProgram.draw(quad, right, flipY = false, width, height, eyeFrameShape(frame, width, height, leftEye = false))
         GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    /** Рамка глаза в пикселях области [width]×[height]: та же, что у полноразмерного глаза, в масштабе. */
+    private fun eyeFrameShape(frame: Boolean, width: Int, height: Int, leftEye: Boolean): FrameShape? {
+        if (!frame) return null
+        val eyeWidth = outputSize.width / 2
+        // Сдвиг рамки — в долях полного кадра, как у фото: у потока 16:9 глаз уже
+        val shape = frameShape(eyeWidth, outputSize.height, leftEye, frameShift / mainVisible.first)
+        val framed = framedSize(eyeWidth, outputSize.height)
+        return shape.scaled(width.toFloat() / framed.width, height.toFloat() / framed.height)
     }
 
     /** Время кадра камеры (может быть в базе elapsedRealtime) → System.nanoTime(), как ждёт MediaRecorder. */
@@ -432,7 +488,7 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         val fbo = GlUtil.createFramebuffer(tex)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         // Рисуем перевёрнутым, чтобы glReadPixels вернул строки сверху вниз
-        compose(left, right, width, height, flipY = true)
+        compose(left, right, width, height, flipY = true, frame = eyeFrame)
         val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
         GlUtil.checkError("glReadPixels")
@@ -541,7 +597,10 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         fun release() = GLES20.glDeleteProgram(program)
     }
 
-    /** Рисует готовую текстуру глаза в половину кадра. */
+    /**
+     * Рисует готовую текстуру глаза в половину кадра.
+     * С рамкой кадр рисуется в [FrameShape.image], а всё вне скруглённого окна — чёрное.
+     */
     private class ComposeProgram {
         private val program = GlUtil.createProgram(
             """
@@ -558,8 +617,24 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
             precision highp float;
             varying vec2 vTex;
             uniform sampler2D uTexture;
+            // Всё в пикселях области глаза: её размер, место кадра (x, y, ширина, высота),
+            // центр, половина сторон и радиус окна (0 — без рамки).
+            // Рамка симметрична по вертикали, поэтому направление оси y не важно
+            uniform vec2 uSize;
+            uniform vec4 uImage;
+            uniform vec2 uCenter;
+            uniform vec2 uHalf;
+            uniform float uRadius;
             void main() {
-                gl_FragColor = texture2D(uTexture, vTex);
+                vec2 p = vTex * uSize;
+                vec4 color = texture2D(uTexture, (p - uImage.xy) / uImage.zw);
+                if (uRadius > 0.0) {
+                    // Расстояние до скруглённого прямоугольника, сглаживание в 1 пиксель
+                    vec2 q = abs(p - uCenter) - (uHalf - uRadius);
+                    float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRadius;
+                    color.rgb *= clamp(0.5 - d, 0.0, 1.0);
+                }
+                gl_FragColor = color;
             }
             """
         )
@@ -567,14 +642,31 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
         private val aUv = GLES20.glGetAttribLocation(program, "aUv")
         private val uFlipY = GLES20.glGetUniformLocation(program, "uFlipY")
         private val uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+        private val uSize = GLES20.glGetUniformLocation(program, "uSize")
+        private val uImage = GLES20.glGetUniformLocation(program, "uImage")
+        private val uCenter = GLES20.glGetUniformLocation(program, "uCenter")
+        private val uHalf = GLES20.glGetUniformLocation(program, "uHalf")
+        private val uRadius = GLES20.glGetUniformLocation(program, "uRadius")
 
-        fun draw(quad: FloatBuffer, texture: Int, flipY: Boolean) {
+        fun draw(quad: FloatBuffer, texture: Int, flipY: Boolean, width: Int, height: Int, frame: FrameShape?) {
             GLES20.glUseProgram(program)
             bindQuad(quad, aPosition, aUv)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
             GLES20.glUniform1i(uTexture, 0)
             GLES20.glUniform1f(uFlipY, if (flipY) -1f else 1f)
+            GLES20.glUniform2f(uSize, width.toFloat(), height.toFloat())
+            if (frame != null) {
+                val image = frame.image
+                val window = frame.window
+                GLES20.glUniform4f(uImage, image.left, image.top, image.width(), image.height())
+                GLES20.glUniform2f(uCenter, window.centerX(), window.centerY())
+                GLES20.glUniform2f(uHalf, window.width() / 2, window.height() / 2)
+                GLES20.glUniform1f(uRadius, frame.radius)
+            } else {
+                GLES20.glUniform4f(uImage, 0f, 0f, width.toFloat(), height.toFloat())
+                GLES20.glUniform1f(uRadius, 0f)
+            }
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
 
@@ -583,6 +675,33 @@ class StereoRenderer(private val rig: StereoRig, private val listener: Listener)
 
     companion object {
         private const val TAG = "StereoRenderer"
+        /** Рамка глаза: поля вокруг кадра и радиус углов в долях ширины кадра (общие с StillComposer). */
+        const val FRAME_MARGIN = 0.035f
+        const val FRAME_RADIUS = 0.06f
+
+        /** Поля рамки вокруг кадра глаза в пикселях; кратны 8, чтобы размеры кадра видео остались кратны 16. */
+        fun framePadding(eyeWidth: Int): Int = (FRAME_MARGIN * eyeWidth / 8).roundToInt() * 8
+
+        /** Размер глаза вместе с полями рамки. */
+        fun framedSize(eyeWidth: Int, eyeHeight: Int): Size {
+            val padding = framePadding(eyeWidth)
+            return Size(eyeWidth + 2 * padding, eyeHeight + 2 * padding)
+        }
+
+        /**
+         * Рамка глаза в пикселях глаза с полями ([framedSize]): кадр лежит внутри полей целиком,
+         * окно совпадает с ним и перекрывает только скругления углов.
+         * «Плавающее окно»: сдвиг [shift] в долях ширины кадра закрывает внешний край —
+         * у левого глаза левый, у правого правый, — и рамка выходит вперёд, к зрителю.
+         * Левый/правый — половины SBS-кадра, как его смотрят в очках.
+         */
+        fun frameShape(eyeWidth: Int, eyeHeight: Int, leftEye: Boolean, shift: Float): FrameShape {
+            val padding = framePadding(eyeWidth).toFloat()
+            val image = RectF(padding, padding, padding + eyeWidth, padding + eyeHeight)
+            val inset = shift * eyeWidth
+            val window = RectF(image).apply { if (leftEye) left += inset else right -= inset }
+            return FrameShape(image, window, FRAME_RADIUS * eyeWidth)
+        }
         /** Сколько времени обрезанные кадры каждой камеры могут ждать пару. */
         private const val RING_WAIT_NS = 130_000_000L
         private const val RING_SIZE_MIN = 5

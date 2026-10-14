@@ -25,7 +25,10 @@ in a VR headset or on a 3D display right away.
 
 - **Photo** — full-resolution SBS 6048×4032.
 - **Video** — 4:3 at 30 fps or 16:9 at 30 / 60 fps, a single MP4 with stereo sound.
-- Automatic alignment of the two cameras from lens calibration, with manual fine-tuning.
+- Automatic alignment of the two cameras from lens calibration, with manual fine-tuning
+  (scale, vertical and horizontal shift).
+- Optional black frame with rounded corners around each eye (preview, photos and videos), added around
+  the image so no resolution is lost. The frame can float in front of the scene (stereo window).
 - Color matching between the cameras, so both eyes look the same.
 - The preview overlays both eyes at 50% opacity; saved photos and videos are always SBS.
 - Files go to the `DCIM/3D Camera` album with the `_SBS` suffix that VR players recognize.

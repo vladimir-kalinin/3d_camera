@@ -59,6 +59,8 @@ class MainActivity : AppCompatActivity() {
     private var calibration = StereoRenderer.Calibration()
     private var overlayPreview = true
     private var showStreamInfo = true
+    private var eyeFrame = false
+    private var frameShift = 0f
     private var mode = CaptureMode.VIDEO
     private var videoFormat = VideoFormat()
     /** Открытая панель настроек видео: обновляется при смене формата. */
@@ -74,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private var recordingStartedAt = 0L
     /** Строки о размерах потоков для карточки статуса: подпись → значение. */
     private var streamRows = emptyList<Pair<String, String>>()
+    private var wideStreamSize: Size? = null
     private var permissionAsked = false
     private var cameraStalled = false
     /** Последний снимок или видео — открывается по нажатию на миниатюру. */
@@ -130,6 +133,8 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).let {
             overlayPreview = it.getBoolean(KEY_OVERLAY, true)
             showStreamInfo = it.getBoolean(KEY_STREAM_INFO, true)
+            eyeFrame = it.getBoolean(KEY_EYE_FRAME, false)
+            frameShift = it.getFloat(KEY_FRAME_SHIFT, 0f).coerceIn(0f, 0.1f)
         }
         binding.aboutButton.setOnClickListener { showAbout() }
         binding.calibrationButton.setOnClickListener { showSettings() }
@@ -215,6 +220,8 @@ class MainActivity : AppCompatActivity() {
         })
         renderer.calibration = calibration
         renderer.overlayPreview = overlayPreview
+        renderer.eyeFrame = eyeFrame
+        renderer.frameShift = frameShift
         val (wideSurface, mainSurface) = renderer.start()
         this.renderer = renderer
         previewSurface?.let { renderer.setPreviewSurface(it) }
@@ -226,16 +233,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onStarted(wideSize: Size, mainSize: Size, frameRate: Int, stillsEnabled: Boolean) {
-                val out = renderer.outputSize
                 runOnUiThread {
                     this@MainActivity.stillsEnabled = stillsEnabled
                     streamFrameRate = frameRate
-                    val main = rig.main.jpegSize
-                    streamRows = if (stillsEnabled && main != null) {
-                        listOf("Photo" to "${main.height * 2}×${main.width}")
-                    } else {
-                        listOf("SBS" to "${out.width}×${out.height}")
-                    } + ("Wide stream" to "${wideSize.width}×${wideSize.height}")
+                    wideStreamSize = wideSize
+                    updateStreamRows()
                     showStatus(streamRows)
                     updatePreviewLayout()
                 }
@@ -245,6 +247,22 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show() }
             }
         }, mode, videoFormat, wideSizeOverride()).also { it.open() }
+    }
+
+    /** Размер итогового кадра (с рамкой, если она включена) и поток широкоугольной для карточки статуса. */
+    private fun updateStreamRows() {
+        val rig = rig ?: return
+        val renderer = renderer ?: return
+        val wideSize = wideStreamSize ?: return
+        val main = rig.main.jpegSize
+        streamRows = if (stillsEnabled && main != null) {
+            // JPEG в ориентации сенсора, глаз — портрет
+            val eye = if (eyeFrame) StereoRenderer.framedSize(main.height, main.width) else Size(main.height, main.width)
+            listOf("Photo" to "${eye.width * 2}×${eye.height}")
+        } else {
+            val out = renderer.framedOutputSize()
+            listOf("SBS" to "${out.width}×${out.height}")
+        } + ("Wide stream" to "${wideSize.width}×${wideSize.height}")
     }
 
     /** Отладочный запуск: adb shell am start ... --es wide_size 2048x1536 */
@@ -426,6 +444,8 @@ class MainActivity : AppCompatActivity() {
             // Полноразмерный снимок с обеих камер, SBS собирается на CPU
             val rig = rig ?: return
             val calibration = calibration
+            val frame = eyeFrame
+            val frameShift = frameShift
             camera.captureStill { still ->
                 if (still == null) {
                     onPhotoSaved(null)
@@ -433,7 +453,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 io.execute {
                     val uri = try {
-                        val bitmap = StillComposer.compose(rig, calibration, still.wideJpeg, still.mainJpeg)
+                        val bitmap = StillComposer.compose(rig, calibration, frame, frameShift, still.wideJpeg, still.mainJpeg)
                         saver.savePhoto(bitmap).also { bitmap.recycle() }
                     } catch (e: Throwable) {
                         Log.e(TAG, "Не удалось собрать фото", e)
@@ -499,7 +519,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         val renderer = renderer ?: return
-        val size = renderer.outputSize
+        val frame = eyeFrame
+        val size = renderer.framedOutputSize(frame)
         if (size.width == 0) return
         val withAudio = hasPermission(Manifest.permission.RECORD_AUDIO)
         val frameRate = streamFrameRate
@@ -508,7 +529,7 @@ class MainActivity : AppCompatActivity() {
         io.execute {
             try {
                 val surface = videoRecorder.start(size, frameRate, withAudio)
-                renderer.startRecording(surface)
+                renderer.startRecording(surface, frame)
                 runOnUiThread {
                     isRecording = true
                     recordingStartedAt = SystemClock.elapsedRealtime()
@@ -566,11 +587,13 @@ class MainActivity : AppCompatActivity() {
         val sheet = SheetSettingsBinding.inflate(layoutInflater)
         sheet.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
         sheet.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
+        sheet.horizontalSlider.value = shiftToProgress(calibration.horizontalShift).toFloat()
         val changeListener = Slider.OnChangeListener { _, _, fromUser ->
             if (!fromUser) return@OnChangeListener
             calibration = calibration.copy(
                 scale = progressToScale(sheet.scaleSlider.value.toInt()),
                 verticalShift = progressToShift(sheet.verticalSlider.value.toInt()),
+                horizontalShift = progressToShift(sheet.horizontalSlider.value.toInt()),
             )
             applyCalibration()
         }
@@ -578,7 +601,7 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(slider: Slider) = Unit
             override fun onStopTrackingTouch(slider: Slider) = saveCalibration()
         }
-        for (slider in listOf(sheet.scaleSlider, sheet.verticalSlider)) {
+        for (slider in listOf(sheet.scaleSlider, sheet.verticalSlider, sheet.horizontalSlider)) {
             slider.addOnChangeListener(changeListener)
             slider.addOnSliderTouchListener(touchListener)
         }
@@ -587,6 +610,17 @@ class MainActivity : AppCompatActivity() {
         sheet.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
         sheet.overlaySwitch.isChecked = overlayPreview
         sheet.overlaySwitch.setOnCheckedChangeListener { _, isChecked -> setOverlayPreview(isChecked) }
+        sheet.eyeFrameSwitch.isChecked = eyeFrame
+        sheet.eyeFrameSwitch.setOnCheckedChangeListener { _, isChecked -> setEyeFrame(isChecked) }
+        sheet.frameShiftSlider.value = frameShiftToProgress(frameShift).toFloat()
+        sheet.frameShiftSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) setFrameShift(progressToFrameShift(value.toInt()))
+        }
+        sheet.frameShiftSlider.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) = Unit
+            override fun onStopTrackingTouch(slider: Slider) =
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putFloat(KEY_FRAME_SHIFT, frameShift).apply()
+        })
         sheet.streamInfoSwitch.isChecked = showStreamInfo
         sheet.streamInfoSwitch.setOnCheckedChangeListener { _, isChecked -> setShowStreamInfo(isChecked) }
 
@@ -615,19 +649,29 @@ class MainActivity : AppCompatActivity() {
         val total = (rig?.wideCropFactor ?: 1f) * calibration.scale
         sheet.scaleValue.text = String.format(Locale.US, "%.3f× (total %.3f×)", calibration.scale, total)
         sheet.verticalValue.text = String.format(Locale.US, "%+.1f%%", calibration.verticalShift * 100)
+        sheet.horizontalValue.text = String.format(Locale.US, "%+.1f%%", calibration.horizontalShift * 100)
+        sheet.frameShiftValue.text = String.format(Locale.US, "%+.1f%%", frameShift * 100)
+        // Сдвиг рамки имеет смысл только с рамкой
+        val frameShiftVisibility = if (eyeFrame) View.VISIBLE else View.GONE
+        sheet.frameShiftRow.visibility = frameShiftVisibility
+        sheet.frameShiftSlider.visibility = frameShiftVisibility
     }
 
-    // Масштаб: 0.90..1.10, сдвиг: −5%..+5% высоты кадра; середина ползунка — без подстройки
+    // Масштаб: 0.90..1.10, сдвиги: −5%..+5% кадра; середина ползунка — без подстройки
     private fun progressToScale(progress: Int) = 0.9f + progress / 1000f
     private fun scaleToProgress(scale: Float) = ((scale - 0.9f) * 1000).toInt().coerceIn(0, 200)
     private fun progressToShift(progress: Int) = (progress - 100) / 2000f
     private fun shiftToProgress(shift: Float) = (shift * 2000 + 100).toInt().coerceIn(0, 200)
+    // Сдвиг рамки: 0..10% ширины кадра
+    private fun progressToFrameShift(progress: Int) = progress / 2000f
+    private fun frameShiftToProgress(shift: Float) = (shift * 2000).toInt().coerceIn(0, 200)
 
     private fun loadCalibration(): StereoRenderer.Calibration {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         return StereoRenderer.Calibration(
             scale = prefs.getFloat(KEY_SCALE, 1f),
             verticalShift = prefs.getFloat(KEY_VERTICAL, 0f),
+            horizontalShift = prefs.getFloat(KEY_HORIZONTAL, 0f),
             swapEyes = prefs.getBoolean(KEY_SWAP, false),
         )
     }
@@ -636,6 +680,7 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putFloat(KEY_SCALE, calibration.scale)
             .putFloat(KEY_VERTICAL, calibration.verticalShift)
+            .putFloat(KEY_HORIZONTAL, calibration.horizontalShift)
             .putBoolean(KEY_SWAP, calibration.swapEyes)
             .apply()
     }
@@ -645,6 +690,7 @@ class MainActivity : AppCompatActivity() {
         settings?.let {
             it.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
             it.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
+            it.horizontalSlider.value = shiftToProgress(calibration.horizontalShift).toFloat()
         }
         applyCalibration()
         saveCalibration()
@@ -658,6 +704,23 @@ class MainActivity : AppCompatActivity() {
         updatePreviewLayout()
     }
 
+    private fun setEyeFrame(frame: Boolean) {
+        if (frame == eyeFrame) return
+        eyeFrame = frame
+        renderer?.eyeFrame = frame
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_EYE_FRAME, frame).apply()
+        updateCalibrationLabels()
+        updatePreviewLayout()
+        updateStreamRows()
+        showStatus(streamRows)
+    }
+
+    private fun setFrameShift(shift: Float) {
+        frameShift = shift
+        renderer?.frameShift = shift
+        updateCalibrationLabels()
+    }
+
     private fun setShowStreamInfo(show: Boolean) {
         if (show == showStreamInfo) return
         showStreamInfo = show
@@ -665,9 +728,9 @@ class MainActivity : AppCompatActivity() {
         showStatus(streamRows)
     }
 
-    /** Пропорции превью: в режиме наложения — один глаз, иначе весь кадр SBS. */
+    /** Пропорции превью: в режиме наложения — один глаз, иначе весь кадр SBS (с рамкой — вместе с её полями). */
     private fun updatePreviewLayout() {
-        val out = renderer?.outputSize ?: return
+        val out = renderer?.framedOutputSize() ?: return
         if (out.width == 0) return
         val width = if (overlayPreview) out.width / 2 else out.width
         (binding.preview.layoutParams as ConstraintLayout.LayoutParams).dimensionRatio = "$width:${out.height}"
@@ -722,9 +785,12 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS_NAME = "stereo_calibration"
         private const val KEY_SCALE = "scale"
         private const val KEY_VERTICAL = "vertical_shift"
+        private const val KEY_HORIZONTAL = "horizontal_shift"
         private const val KEY_SWAP = "swap_eyes"
         private const val KEY_OVERLAY = "overlay_preview"
         private const val KEY_STREAM_INFO = "show_stream_info"
+        private const val KEY_EYE_FRAME = "eye_frame"
+        private const val KEY_FRAME_SHIFT = "frame_shift"
         private const val KEY_MODE = "capture_mode"
         private const val KEY_VIDEO_ASPECT = "video_aspect"
         private const val KEY_VIDEO_FPS = "video_fps"
