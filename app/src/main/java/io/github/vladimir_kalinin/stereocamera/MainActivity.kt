@@ -33,6 +33,7 @@ import io.github.vladimir_kalinin.stereocamera.camera.VideoFormat
 import io.github.vladimir_kalinin.stereocamera.camera.StereoCamera
 import io.github.vladimir_kalinin.stereocamera.camera.StereoRig
 import io.github.vladimir_kalinin.stereocamera.databinding.ActivityMainBinding
+import io.github.vladimir_kalinin.stereocamera.databinding.SheetAlignmentBinding
 import io.github.vladimir_kalinin.stereocamera.databinding.SheetSettingsBinding
 import io.github.vladimir_kalinin.stereocamera.databinding.SheetVideoSettingsBinding
 import io.github.vladimir_kalinin.stereocamera.gl.StereoRenderer
@@ -66,6 +67,8 @@ class MainActivity : AppCompatActivity() {
     /** Открытая панель настроек видео: обновляется при смене формата. */
     private var videoSettings: SheetVideoSettingsBinding? = null
     private var videoSettingsDialog: BottomSheetDialog? = null
+    private var alignment: SheetAlignmentBinding? = null
+    private var alignmentDialog: BottomSheetDialog? = null
     private var settings: SheetSettingsBinding? = null
     private var settingsDialog: BottomSheetDialog? = null
     /** Частота кадров, с которой камера фактически работает (для энкодера). */
@@ -100,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
+        setupEdgeToEdge(binding.root)
         setContentView(binding.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -132,11 +136,10 @@ class MainActivity : AppCompatActivity() {
         binding.galleryButton.setOnClickListener { openLastMedia() }
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).let {
             overlayPreview = it.getBoolean(KEY_OVERLAY, true)
-            showStreamInfo = it.getBoolean(KEY_STREAM_INFO, true)
             eyeFrame = it.getBoolean(KEY_EYE_FRAME, false)
             frameShift = it.getFloat(KEY_FRAME_SHIFT, 0f).coerceIn(0f, 0.1f)
         }
-        binding.aboutButton.setOnClickListener { showAbout() }
+        binding.alignmentButton.setOnClickListener { showAlignment() }
         binding.calibrationButton.setOnClickListener { showSettings() }
         io.execute {
             saver.moveToCommonFolder()
@@ -148,6 +151,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         getSystemService(PowerManager::class.java).addThermalStatusListener(mainExecutor, thermalListener)
         if (rig == null) return
+        // Переключается на экране настроек
+        showStreamInfo = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_STREAM_INFO, true)
+        showStatus(streamRows)
         if (hasPermission(Manifest.permission.CAMERA)) {
             startCamera()
         } else if (!permissionAsked) {
@@ -161,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         // Камеру обязательно освобождаем, иначе её не смогут открыть другие приложения
         if (isRecording) stopRecording(wait = true)
         videoSettingsDialog?.dismiss()
+        alignmentDialog?.dismiss()
         settingsDialog?.dismiss()
         stopCamera()
         getSystemService(PowerManager::class.java).removeThermalStatusListener(thermalListener)
@@ -337,10 +344,8 @@ class MainActivity : AppCompatActivity() {
         binding.photoModeButton.isEnabled = !isRecording
         binding.videoModeButton.isEnabled = !isRecording
         updateVideoFormatUi()
-        for (view in listOf(binding.galleryButton, binding.aboutButton)) {
-            view.isEnabled = !isRecording
-            view.animate().alpha(if (isRecording) 0f else 1f).setDuration(150)
-        }
+        binding.galleryButton.isEnabled = !isRecording
+        binding.galleryButton.animate().alpha(if (isRecording) 0f else 1f).setDuration(150)
     }
 
     /** Кнопка формата видео: видна только в режиме видео и если камера умеет что-то кроме 4:3. */
@@ -579,12 +584,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- Настройки: подстройка совмещения и превью ----------
+    // ---------- Шторки: совмещение глаз и настройки превью ----------
 
-    /** Шторка «Настройки» по образцу панели видео; превью под ней не затемняется, чтобы видеть совмещение. */
-    private fun showSettings() {
-        if (settingsDialog != null) return
-        val sheet = SheetSettingsBinding.inflate(layoutInflater)
+    /** Шторка «Eye alignment»; превью под ней не затемняется, чтобы видеть совмещение. */
+    private fun showAlignment() {
+        if (alignmentDialog != null) return
+        val sheet = SheetAlignmentBinding.inflate(layoutInflater)
         sheet.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
         sheet.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
         sheet.horizontalSlider.value = shiftToProgress(calibration.horizontalShift).toFloat()
@@ -608,6 +613,26 @@ class MainActivity : AppCompatActivity() {
         sheet.resetCalibrationButton.setOnClickListener { resetCalibration() }
         sheet.swapEyesSwitch.isChecked = calibration.swapEyes
         sheet.swapEyesSwitch.setOnCheckedChangeListener { _, isChecked -> setSwapEyes(isChecked) }
+
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        dialog.window?.setDimAmount(0f)
+        dialog.setOnDismissListener {
+            alignment = null
+            alignmentDialog = null
+            binding.alignmentButton.isChecked = false
+        }
+        alignment = sheet
+        alignmentDialog = dialog
+        updateCalibrationLabels()
+        binding.alignmentButton.isChecked = true
+        dialog.show()
+    }
+
+    /** Шторка «Настройки» по образцу панели видео: превью и рамка, остальное — на отдельном экране. */
+    private fun showSettings() {
+        if (settingsDialog != null) return
+        val sheet = SheetSettingsBinding.inflate(layoutInflater)
         sheet.overlaySwitch.isChecked = overlayPreview
         sheet.overlaySwitch.setOnCheckedChangeListener { _, isChecked -> setOverlayPreview(isChecked) }
         sheet.eyeFrameSwitch.isChecked = eyeFrame
@@ -621,8 +646,12 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(slider: Slider) =
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putFloat(KEY_FRAME_SHIFT, frameShift).apply()
         })
-        sheet.streamInfoSwitch.isChecked = showStreamInfo
-        sheet.streamInfoSwitch.setOnCheckedChangeListener { _, isChecked -> setShowStreamInfo(isChecked) }
+        sheet.moreSettingsButton.isEnabled = !isRecording
+        sheet.moreSettingsButton.setOnClickListener {
+            if (isRecording) return@setOnClickListener
+            settingsDialog?.dismiss()
+            startActivity(SettingsActivity.intent(this, streamRows))
+        }
 
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(sheet.root)
@@ -634,7 +663,7 @@ class MainActivity : AppCompatActivity() {
         }
         settings = sheet
         settingsDialog = dialog
-        updateCalibrationLabels()
+        updateFrameShiftLabel()
         binding.calibrationButton.isChecked = true
         dialog.show()
     }
@@ -645,16 +674,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateCalibrationLabels() {
-        val sheet = settings ?: return
+        val sheet = alignment ?: return
         val total = (rig?.wideCropFactor ?: 1f) * calibration.scale
         sheet.scaleValue.text = String.format(Locale.US, "%.3f× (total %.3f×)", calibration.scale, total)
         sheet.verticalValue.text = String.format(Locale.US, "%+.1f%%", calibration.verticalShift * 100)
         sheet.horizontalValue.text = String.format(Locale.US, "%+.1f%%", calibration.horizontalShift * 100)
+    }
+
+    private fun updateFrameShiftLabel() {
+        val sheet = settings ?: return
         sheet.frameShiftValue.text = String.format(Locale.US, "%+.1f%%", frameShift * 100)
-        // Сдвиг рамки имеет смысл только с рамкой
-        val frameShiftVisibility = if (eyeFrame) View.VISIBLE else View.GONE
-        sheet.frameShiftRow.visibility = frameShiftVisibility
-        sheet.frameShiftSlider.visibility = frameShiftVisibility
+        // Сдвиг рамки имеет смысл только с рамкой; без неё пункт виден, но неактивен, чтобы шторка не прыгала
+        sheet.frameShiftSlider.isEnabled = eyeFrame
+        sheet.frameShiftRow.alpha = if (eyeFrame) 1f else DISABLED_ALPHA
     }
 
     // Масштаб: 0.90..1.10, сдвиги: −5%..+5% кадра; середина ползунка — без подстройки
@@ -687,7 +719,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetCalibration() {
         calibration = StereoRenderer.Calibration(swapEyes = calibration.swapEyes)
-        settings?.let {
+        alignment?.let {
             it.scaleSlider.value = scaleToProgress(calibration.scale).toFloat()
             it.verticalSlider.value = shiftToProgress(calibration.verticalShift).toFloat()
             it.horizontalSlider.value = shiftToProgress(calibration.horizontalShift).toFloat()
@@ -709,7 +741,7 @@ class MainActivity : AppCompatActivity() {
         eyeFrame = frame
         renderer?.eyeFrame = frame
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_EYE_FRAME, frame).apply()
-        updateCalibrationLabels()
+        updateFrameShiftLabel()
         updatePreviewLayout()
         updateStreamRows()
         showStatus(streamRows)
@@ -718,14 +750,7 @@ class MainActivity : AppCompatActivity() {
     private fun setFrameShift(shift: Float) {
         frameShift = shift
         renderer?.frameShift = shift
-        updateCalibrationLabels()
-    }
-
-    private fun setShowStreamInfo(show: Boolean) {
-        if (show == showStreamInfo) return
-        showStreamInfo = show
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_STREAM_INFO, show).apply()
-        showStatus(streamRows)
+        updateFrameShiftLabel()
     }
 
     /** Пропорции превью: в режиме наложения — один глаз, иначе весь кадр SBS (с рамкой — вместе с её полями). */
@@ -743,24 +768,6 @@ class MainActivity : AppCompatActivity() {
         calibration = calibration.copy(swapEyes = swap)
         applyCalibration()
         saveCalibration()
-    }
-
-    // ---------- О камерах ----------
-
-    private fun showAbout() {
-        val rig = rig ?: return
-        val left = if (rig.wideIsLeft != calibration.swapEyes) "wide" else "main"
-        val lines = listOf(
-            "Logical camera: ${rig.logicalId}",
-            "Wide: id ${rig.wide.id}, ${rig.wide.focalLengthMm} mm",
-            "Main: id ${rig.main.id}, ${rig.main.focalLengthMm} mm",
-            "Wide crop: ${String.format(Locale.US, "%.3f", rig.wideCropFactor)}×",
-            "Baseline: ${rig.baselineMeters?.let { String.format(Locale.US, "%.1f mm", it * 1000) } ?: "unknown"}",
-            "Left eye: $left",
-        ) + streamRows.map { (label, value) -> "$label: $value" } +
-            "Files: Gallery → ${MediaSaver.ALBUM}"
-        val message = lines.joinToString("\n")
-        MaterialAlertDialogBuilder(this).setTitle(R.string.about).setMessage(message).setPositiveButton("OK", null).show()
     }
 
     // ---------- Разрешения ----------
@@ -782,13 +789,16 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        private const val PREFS_NAME = "stereo_calibration"
+        /** Прозрачность неактивных элементов в Material 3. */
+        private const val DISABLED_ALPHA = 0.38f
+        // Общие с экраном настроек
+        const val PREFS_NAME = "stereo_calibration"
+        const val KEY_SWAP = "swap_eyes"
+        const val KEY_STREAM_INFO = "show_stream_info"
         private const val KEY_SCALE = "scale"
         private const val KEY_VERTICAL = "vertical_shift"
         private const val KEY_HORIZONTAL = "horizontal_shift"
-        private const val KEY_SWAP = "swap_eyes"
         private const val KEY_OVERLAY = "overlay_preview"
-        private const val KEY_STREAM_INFO = "show_stream_info"
         private const val KEY_EYE_FRAME = "eye_frame"
         private const val KEY_FRAME_SHIFT = "frame_shift"
         private const val KEY_MODE = "capture_mode"

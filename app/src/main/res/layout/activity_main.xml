@@ -140,15 +140,15 @@
         app:layout_constraintStart_toEndOf="@id/shutterButton"
         app:layout_constraintTop_toTopOf="@id/shutterButton" />
 
-    <!-- Нижний ряд: о камерах · фото/видео · подстройка -->
+    <!-- Нижний ряд: совмещение глаз · фото/видео · настройки -->
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/aboutButton"
-        style="@style/Widget.My3DCamera.IconButton"
+        android:id="@+id/alignmentButton"
+        style="@style/Widget.My3DCamera.ToggleIconButton"
         android:layout_width="56dp"
         android:layout_height="56dp"
         android:layout_marginStart="24dp"
-        android:contentDescription="@string/about"
-        app:icon="@drawable/ic_info"
+        android:contentDescription="@string/calibration_title"
+        app:icon="@drawable/ic_eye_tracking"
         app:layout_constraintBottom_toBottomOf="@id/modeSwitch"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@id/modeSwitch" />

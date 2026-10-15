@@ -47,7 +47,7 @@ The ultra-wide frame is cropped to the main camera's field of view (≈1.976× o
 aligned. A 16:9 stream is a center crop of the 4:3 sensor, so optical centers are converted into its
 coordinates (`principalIn`).
 
-Manual fine-tuning in Settings: ultra-wide scale, vertical shift and horizontal shift. The camera modules
+Manual fine-tuning in the "Eye alignment" panel (left button in the bottom row): ultra-wide scale, vertical shift and horizontal shift. The camera modules
 are not perfectly parallel, so without the horizontal shift distant objects don't coincide. Shifts are stored
 as fractions of the **full sensor frame** and converted into stream coordinates (`portraitVisible`):
 in portrait a 16:9 stream shows only 75% of the 4:3 width, and a shift taken as a fraction of the stream

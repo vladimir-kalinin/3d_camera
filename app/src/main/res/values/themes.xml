@@ -3,8 +3,19 @@
     <!-- Material You: на Android 12+ цвета берутся из обоев, как в Google Камере -->
     <style name="Theme.My3DCamera" parent="Theme.Material3.DynamicColors.Dark.NoActionBar">
         <item name="android:windowBackground">@color/black</item>
-        <item name="android:statusBarColor">@color/black</item>
-        <item name="android:navigationBarColor">@color/black</item>
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.My3DCamera.BottomSheetDialog</item>
+    </style>
+
+    <!-- Шторки заходят под полосу жестов, иначе под ними видна чёрная системная полоса
+         (цвет полосы нужен до Android 15, дальше edge-to-edge и так принудительный) -->
+    <style name="ThemeOverlay.My3DCamera.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="enableEdgeToEdge">true</item>
+    </style>
+
+    <!-- Экран настроек: фон окна того же цвета, что и экран (виден под полосами при переходе) -->
+    <style name="Theme.My3DCamera.Settings">
+        <item name="android:windowBackground">?attr/colorSurface</item>
     </style>
 
     <!-- Иконка-кнопка с иконкой строго по центру при любом размере -->
@@ -73,6 +84,14 @@
         <item name="backgroundTint">@color/sheet_option_bg</item>
         <item name="android:textColor">@color/sheet_option_text</item>
         <item name="cornerRadius">14dp</item>
+    </style>
+
+    <!-- Вариант-иконка (как 30/60 fps в Google Камере): иконка строго по центру, цвет — как у текста -->
+    <style name="Widget.My3DCamera.SheetOption.Icon">
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">0dp</item>
+        <item name="iconSize">28dp</item>
+        <item name="iconTint">@color/sheet_option_text</item>
     </style>
 
     <!-- Кнопка рядом со спуском: текущий формат видео, открывает панель настроек -->

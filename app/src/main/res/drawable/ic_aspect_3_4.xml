@@ -1,0 +1,11 @@
+<!-- Портретный кадр 3:4 в геометрии «crop_9_16»: та же высота, толщина и скругление -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <path
+        android:fillColor="@color/white"
+        android:fillType="evenOdd"
+        android:pathData="M290,840Q257,840 233.5,816.5Q210,793 210,760L210,200Q210,167 233.5,143.5Q257,120 290,120L670,120Q703,120 726.5,143.5Q750,167 750,200L750,760Q750,793 726.5,816.5Q703,840 670,840ZM290,200L290,760L670,760L670,200Z" />
+</vector>

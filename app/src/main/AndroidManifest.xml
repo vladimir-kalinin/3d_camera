@@ -17,6 +17,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.My3DCamera"
         tools:targetApi="31">
+        <!-- Android 16 на больших экранах игнорирует portrait; камера и рендерер рассчитаны только на портрет.
+             Временный отказ, Android 17 его уберёт — тогда нужна поддержка поворота. -->
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
         <activity
             android:name="io.github.vladimir_kalinin.stereocamera.MainActivity"
             android:exported="true"
@@ -27,6 +32,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="io.github.vladimir_kalinin.stereocamera.SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.My3DCamera.Settings" />
     </application>
 
 </manifest>

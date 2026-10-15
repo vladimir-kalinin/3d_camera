@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Панель «Настройки видео» по образцу Google Камеры: подпись и значение слева, варианты справа -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -36,14 +37,16 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/aspect43Option"
-            style="@style/Widget.My3DCamera.SheetOption"
-            android:text="@string/aspect_4_3" />
+            style="@style/Widget.My3DCamera.SheetOption.Icon"
+            android:contentDescription="@string/aspect_4_3"
+            app:icon="@drawable/ic_aspect_3_4" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/aspect169Option"
-            style="@style/Widget.My3DCamera.SheetOption"
+            style="@style/Widget.My3DCamera.SheetOption.Icon"
             android:layout_marginStart="10dp"
-            android:text="@string/aspect_16_9" />
+            android:contentDescription="@string/aspect_16_9"
+            app:icon="@drawable/ic_aspect_9_16" />
     </LinearLayout>
 
     <LinearLayout
@@ -63,13 +66,15 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/fps30Option"
-            style="@style/Widget.My3DCamera.SheetOption"
-            android:text="30" />
+            style="@style/Widget.My3DCamera.SheetOption.Icon"
+            android:contentDescription="@string/fps_30"
+            app:icon="@drawable/ic_fps_30" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/fps60Option"
-            style="@style/Widget.My3DCamera.SheetOption"
+            style="@style/Widget.My3DCamera.SheetOption.Icon"
             android:layout_marginStart="10dp"
-            android:text="60" />
+            android:contentDescription="@string/fps_60"
+            app:icon="@drawable/ic_fps_60" />
     </LinearLayout>
 </LinearLayout>
