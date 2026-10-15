@@ -380,6 +380,9 @@ class MainActivity : AppCompatActivity() {
         option(sheet.aspect169Option) { videoFormat.withAspect(VideoAspect.RATIO_16_9) }
         option(sheet.fps30Option) { videoFormat.withFrameRate(30) }
         option(sheet.fps60Option) { videoFormat.withFrameRate(60) }
+        for (button in listOf(sheet.aspect43Option, sheet.aspect169Option, sheet.fps30Option, sheet.fps60Option)) {
+            button.roundWhenChecked()
+        }
 
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(sheet.root)
@@ -633,8 +636,11 @@ class MainActivity : AppCompatActivity() {
     private fun showSettings() {
         if (settingsDialog != null) return
         val sheet = SheetSettingsBinding.inflate(layoutInflater)
-        sheet.overlaySwitch.isChecked = overlayPreview
-        sheet.overlaySwitch.setOnCheckedChangeListener { _, isChecked -> setOverlayPreview(isChecked) }
+        // Варианты ведут себя как переключатели: нажатие на выбранный ничего не меняет
+        sheet.sideBySideOption.setOnClickListener { setOverlayPreview(false) }
+        sheet.overlayOption.setOnClickListener { setOverlayPreview(true) }
+        sheet.sideBySideOption.roundWhenChecked()
+        sheet.overlayOption.roundWhenChecked()
         sheet.eyeFrameSwitch.isChecked = eyeFrame
         sheet.eyeFrameSwitch.setOnCheckedChangeListener { _, isChecked -> setEyeFrame(isChecked) }
         sheet.frameShiftSlider.value = frameShiftToProgress(frameShift).toFloat()
@@ -663,7 +669,7 @@ class MainActivity : AppCompatActivity() {
         }
         settings = sheet
         settingsDialog = dialog
-        updateFrameShiftLabel()
+        updateSettingsSheet()
         binding.calibrationButton.isChecked = true
         dialog.show()
     }
@@ -681,8 +687,11 @@ class MainActivity : AppCompatActivity() {
         sheet.horizontalValue.text = String.format(Locale.US, "%+.1f%%", calibration.horizontalShift * 100)
     }
 
-    private fun updateFrameShiftLabel() {
+    private fun updateSettingsSheet() {
         val sheet = settings ?: return
+        sheet.previewValue.setText(if (overlayPreview) R.string.overlay_preview else R.string.preview_side_by_side)
+        sheet.sideBySideOption.isChecked = !overlayPreview
+        sheet.overlayOption.isChecked = overlayPreview
         sheet.frameShiftValue.text = String.format(Locale.US, "%+.1f%%", frameShift * 100)
         // Сдвиг рамки имеет смысл только с рамкой; без неё пункт виден, но неактивен, чтобы шторка не прыгала
         sheet.frameShiftSlider.isEnabled = eyeFrame
@@ -729,10 +738,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setOverlayPreview(overlay: Boolean) {
-        if (overlay == overlayPreview) return
+        // Кнопка-вариант сама снимает отметку при повторном нажатии — возвращаем её
+        if (overlay == overlayPreview) {
+            updateSettingsSheet()
+            return
+        }
         overlayPreview = overlay
         renderer?.overlayPreview = overlay
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_OVERLAY, overlay).apply()
+        updateSettingsSheet()
         updatePreviewLayout()
     }
 
@@ -741,7 +755,7 @@ class MainActivity : AppCompatActivity() {
         eyeFrame = frame
         renderer?.eyeFrame = frame
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_EYE_FRAME, frame).apply()
-        updateFrameShiftLabel()
+        updateSettingsSheet()
         updatePreviewLayout()
         updateStreamRows()
         showStatus(streamRows)
@@ -750,7 +764,7 @@ class MainActivity : AppCompatActivity() {
     private fun setFrameShift(shift: Float) {
         frameShift = shift
         renderer?.frameShift = shift
-        updateFrameShiftLabel()
+        updateSettingsSheet()
     }
 
     /** Пропорции превью: в режиме наложения — один глаз, иначе весь кадр SBS (с рамкой — вместе с её полями). */

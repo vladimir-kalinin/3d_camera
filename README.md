@@ -30,7 +30,7 @@ in a VR headset or on a 3D display right away.
 - Optional black frame with rounded corners around each eye (preview, photos and videos), added around
   the image so no resolution is lost. The frame can float in front of the scene (stereo window).
 - Color matching between the cameras, so both eyes look the same.
-- The preview overlays both eyes at 50% opacity; saved photos and videos are always SBS.
+- The preview shows both eyes side by side or overlaid at 50% opacity; saved photos and videos are always SBS.
 - Files go to the `DCIM/3D Camera` album with the `_SBS` suffix that VR players recognize.
 
 ## Installation

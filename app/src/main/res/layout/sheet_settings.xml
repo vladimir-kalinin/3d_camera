@@ -42,15 +42,37 @@
                 app:icon="@drawable/ic_settings" />
         </LinearLayout>
 
-        <!-- Превью как у обычной камеры: глаза наложены полупрозрачно -->
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/overlaySwitch"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/overlay_preview"
-            android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+        <!-- Вид превью: оба глаза рядом (SBS) или наложены полупрозрачно, как у обычной камеры -->
+        <LinearLayout
+            style="@style/Widget.My3DCamera.SheetRow"
+            android:layout_marginEnd="8dp">
+
+            <LinearLayout
+                style="@style/Widget.My3DCamera.SheetRowText"
+                android:paddingStart="0dp">
+
+                <TextView
+                    style="@style/Widget.My3DCamera.SheetRowLabel"
+                    android:text="@string/preview_title" />
+
+                <TextView
+                    android:id="@+id/previewValue"
+                    style="@style/Widget.My3DCamera.SheetRowValue" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/sideBySideOption"
+                style="@style/Widget.My3DCamera.SheetOption.Icon"
+                android:contentDescription="@string/preview_side_by_side"
+                app:icon="@drawable/ic_preview_side_by_side" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/overlayOption"
+                style="@style/Widget.My3DCamera.SheetOption.Icon"
+                android:layout_marginStart="10dp"
+                android:contentDescription="@string/overlay_preview"
+                app:icon="@drawable/ic_preview_overlay" />
+        </LinearLayout>
 
         <!-- Рамка вокруг каждого глаза в превью и фото: окно, за которым видна сцена -->
         <com.google.android.material.materialswitch.MaterialSwitch

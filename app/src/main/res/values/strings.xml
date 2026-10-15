@@ -11,7 +11,9 @@
     <string name="calibration_vertical">Vertical shift</string>
     <string name="calibration_horizontal">Horizontal shift</string>
     <string name="swap_eyes">Swap eyes</string>
-    <string name="overlay_preview">Overlay preview</string>
+    <string name="overlay_preview">Overlay</string>
+    <string name="preview_title">Preview</string>
+    <string name="preview_side_by_side">Side by side</string>
     <string name="eye_frame">Frame around photos</string>
     <string name="frame_shift">Frame depth</string>
     <string name="show_stream_info">Show stream info</string>
