@@ -20,6 +20,8 @@
     <string name="settings">Settings</string>
     <string name="reset_calibration">Reset</string>
     <string name="about">About cameras</string>
+    <string name="share_debug_log">Send debug log</string>
+    <string name="share_debug_log_summary">Device, camera and app logs as a file for the developer. Send it right after the problem happens.</string>
     <string name="more_settings">More settings</string>
     <string name="back">Back</string>
     <string name="video_settings">Video settings</string>

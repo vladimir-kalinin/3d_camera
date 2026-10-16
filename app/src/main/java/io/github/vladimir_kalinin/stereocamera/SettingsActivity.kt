@@ -1,5 +1,6 @@
 package io.github.vladimir_kalinin.stereocamera
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraManager
@@ -7,9 +8,11 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.vladimir_kalinin.stereocamera.camera.StereoRig
 import io.github.vladimir_kalinin.stereocamera.databinding.ActivitySettingsBinding
+import io.github.vladimir_kalinin.stereocamera.debug.DebugReport
 import io.github.vladimir_kalinin.stereocamera.media.MediaSaver
 import java.util.Locale
 
@@ -31,6 +34,39 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putBoolean(MainActivity.KEY_STREAM_INFO, isChecked).apply()
         }
         binding.aboutRow.setOnClickListener { showAbout() }
+        binding.debugLogRow.setOnClickListener { shareDebugLog() }
+    }
+
+    // ---------- Отчёт для разработчика ----------
+
+    private fun shareDebugLog() {
+        binding.debugLogRow.isEnabled = false
+        val appContext = applicationContext
+        // logcat и характеристики камер читаются заметное время — не на UI-потоке
+        Thread {
+            val file = try {
+                DebugReport.writeFile(appContext)
+            } catch (e: Exception) {
+                Log.e(TAG, "Не удалось собрать отчёт", e)
+                null
+            }
+            runOnUiThread {
+                binding.debugLogRow.isEnabled = true
+                if (file == null) {
+                    Toast.makeText(this, "Could not create the debug log", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .putExtra(Intent.EXTRA_SUBJECT, "Stereo Camera debug log")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // ClipData нужен, чтобы превью в системном меню тоже получило доступ к файлу
+                send.clipData = ClipData.newRawUri(file.name, uri)
+                startActivity(Intent.createChooser(send, getString(R.string.share_debug_log)))
+            }
+        }.start()
     }
 
     // ---------- О камерах ----------
